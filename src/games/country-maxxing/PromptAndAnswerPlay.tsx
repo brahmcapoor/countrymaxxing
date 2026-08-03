@@ -1,0 +1,382 @@
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { Country } from "../../data/countries";
+import { WorldMap } from "../../components/WorldMap";
+import { SoundToggle } from "../../components/SoundToggle";
+import { isCloseMatch } from "../../core/fuzzyMatch";
+import { accentSolidClass } from "../../core/palette";
+import { comboClass } from "../../core/combo";
+import { playCorrect, playIncorrect } from "../../core/sound";
+import { recordAttempt } from "../../core/stats";
+import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
+import { roastFor } from "../../data/roasts";
+import {
+  buildQueue,
+  expectedAnswer,
+  matchCandidates,
+  NAMESPACE,
+  promptFor,
+  questionKey,
+  questionMissCount,
+  ROAST_MISS_THRESHOLD,
+  type DirectionSetting,
+  type Question,
+  type SessionType,
+} from "./engine";
+
+const ACCENT = "red"; // matches CountryMaxxing.tsx's accent
+
+export interface PromptAndAnswerResult {
+  correct: number;
+  total: number;
+  /** Expected answers still not mastered — present only on an early give-up
+   * in Learn mode, where "all mastered" wouldn't be true. cca3/region ride
+   * along so the summary screen can group these by region the same way
+   * Manifest's summary does. */
+  remaining?: { cca3: string; region: string; label: string; flag: string }[];
+}
+
+export function PromptAndAnswerPlay({
+  pool,
+  directionSetting,
+  sessionType,
+  onExit,
+}: {
+  pool: Country[];
+  directionSetting: DirectionSetting;
+  sessionType: SessionType;
+  onExit: (result: PromptAndAnswerResult | null) => void;
+}) {
+  const [queue, setQueue] = useState<Question[]>(() => buildQueue(pool, directionSetting));
+  const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [input, setInput] = useState("");
+  const [feedback, setFeedback] = useState<"idle" | "correct" | "incorrect">("idle");
+  const [score, setScore] = useState({ correct: 0, total: 0 });
+  const [combo, setCombo] = useState(0);
+  const [roastMessage, setRoastMessage] = useState<string | null>(null);
+  // Countries already answered correctly — kept highlighted (with a capital
+  // dot) after moving on, instead of only ever showing the current one, so
+  // the map reads as a running progress trail.
+  const [completedCcn3s, setCompletedCcn3s] = useState<Set<string>>(new Set());
+  // Answered incorrectly and not yet redeemed by a later correct answer —
+  // its own color, separate from "done." Getting it right on a requeued
+  // attempt (Learn mode) moves it into completedCcn3s and out of here.
+  const [wrongCcn3s, setWrongCcn3s] = useState<Set<string>>(new Set());
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+  // Always points at the latest advance() closure so the auto-advance timer
+  // below never fires a stale one (e.g. after jumping to a skipped question).
+  const advanceRef = useRef<() => void>(() => {});
+
+  const poolCcn3s = useRef(new Set(pool.map((c) => c.ccn3))).current;
+  const pointCountries = useRef(
+    new Map(
+      pool
+        .filter((c) => MAP_HARD_TO_RENDER.has(c.cca3) && !MAP_ALWAYS_INSET.has(c.cca3))
+        .map((c) => [c.ccn3, c.capitalLatLng] as const),
+    ),
+  ).current;
+  const alwaysInsetCcn3s = useRef(
+    new Set(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => c.ccn3)),
+  ).current;
+  const countryByCcn3 = useRef(new Map(pool.map((c) => [c.ccn3, c] as const))).current;
+
+  const current = queue[0] ?? null;
+  const currentKey = current ? questionKey(current) : null;
+  // `advance` is a hoisted function declaration below — assigning it here
+  // every render keeps the ref current before any effect can read it.
+  advanceRef.current = advance;
+
+  useEffect(() => {
+    if (feedback === "idle") inputRef.current?.focus();
+    else nextButtonRef.current?.focus();
+  }, [feedback, currentKey]);
+
+  // A correct answer auto-advances after a beat; an incorrect one waits for
+  // a manual Next so there's time to read the correction (and any roast).
+  // The effect's own cleanup (on feedback/currentKey change) cancels it —
+  // no manual clearing needed in advance()/skip()/jumpTo().
+  useEffect(() => {
+    if (feedback !== "correct") return;
+    const timeout = setTimeout(() => advanceRef.current(), 800);
+    return () => clearTimeout(timeout);
+  }, [feedback, currentKey]);
+
+  // The wrong guess shakes itself out rather than sitting there readOnly —
+  // cleared once the shake animation (0.35s) finishes, so the box reads
+  // as reset while the correction/roast above it stays up for Next.
+  useEffect(() => {
+    if (feedback !== "incorrect") return;
+    const timeout = setTimeout(() => setInput(""), 350);
+    return () => clearTimeout(timeout);
+  }, [feedback, currentKey]);
+
+  function submitAnswer(answer: string) {
+    if (!current) return;
+    const correct = isCloseMatch(answer, matchCandidates(current));
+    recordAttempt(NAMESPACE, questionKey(current), correct);
+    if (correct) {
+      playCorrect();
+      setCombo((c) => c + 1);
+      setRoastMessage(null);
+    } else {
+      playIncorrect();
+      setCombo(0);
+      const misses = questionMissCount(current);
+      setRoastMessage(misses >= ROAST_MISS_THRESHOLD ? roastFor(current.country.name) : null);
+    }
+    setFeedback(correct ? "correct" : "incorrect");
+    setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
+  }
+
+  function advance() {
+    if (!current) return;
+    const key = questionKey(current);
+    const wasIncorrect = feedback === "incorrect";
+    const requeue = sessionType === "learn" && wasIncorrect;
+    const rest = queue.slice(1);
+    const nextQueue = requeue ? [...rest, current] : rest;
+    const ccn3 = current.country.ccn3;
+
+    setSkippedKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    if (wasIncorrect) {
+      setWrongCcn3s((prev) => new Set(prev).add(ccn3));
+    } else {
+      setCompletedCcn3s((prev) => new Set(prev).add(ccn3));
+      setWrongCcn3s((prev) => {
+        if (!prev.has(ccn3)) return prev;
+        const next = new Set(prev);
+        next.delete(ccn3);
+        return next;
+      });
+    }
+    setQueue(nextQueue);
+    setInput("");
+    setFeedback("idle");
+    setRoastMessage(null);
+    if (nextQueue.length === 0) onExit(score);
+  }
+
+  function skip() {
+    if (!current || feedback !== "idle") return;
+    const key = questionKey(current);
+    const rest = queue.slice(1);
+    setSkippedKeys((prev) => new Set(prev).add(key));
+    setQueue([...rest, current]);
+    setInput("");
+    setFeedback("idle");
+  }
+
+  function giveUp() {
+    const remaining =
+      sessionType === "learn"
+        ? queue.map((q) => ({
+            cca3: q.country.cca3,
+            region: q.country.region,
+            label: expectedAnswer(q),
+            flag: q.country.flag,
+          }))
+        : undefined;
+    onExit({ ...score, remaining });
+  }
+
+  function jumpTo(target: Question) {
+    const key = questionKey(target);
+    setQueue((q) => [target, ...q.filter((item) => questionKey(item) !== key)]);
+    setInput("");
+    setFeedback("idle");
+    setShowSkipped(false);
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (feedback === "idle") {
+      if (!input.trim()) return;
+      submitAnswer(input);
+    } else {
+      advance();
+    }
+  }
+
+  if (!current) return null;
+
+  const skippedPending = queue.filter((q) => skippedKeys.has(questionKey(q)));
+
+  // Highlighting the country on the map before it's answered would hand over
+  // the answer outright when the question is "capital → country" (the
+  // highlighted shape *is* the answer). It's safe for "country → capital"
+  // (the text prompt already names the country), and always safe once
+  // answered, as a confirming reveal.
+  const safeToReveal = feedback !== "idle" || current.direction === "country-to-capital";
+  const currentCcn3 = safeToReveal ? current.country.ccn3 : undefined;
+  const dotCcn3s = new Set([...completedCcn3s, ...wrongCcn3s, ...(currentCcn3 ? [currentCcn3] : [])]);
+  const capitalDots = new Map(
+    Array.from(dotCcn3s, (ccn3) => countryByCcn3.get(ccn3)).flatMap((c) =>
+      c ? [[c.ccn3, c.capitalLatLng] as const] : [],
+    ),
+  );
+
+  return (
+    // Full viewport height — there's no App-level header eating space above
+    // this in the current single-game shelf. If a second game reintroduces
+    // the shelf's "back" header (see App.tsx), this needs to subtract that
+    // header's height again, same as it used to.
+    <div className="relative h-dvh animate-[swoop-in_0.5s_ease-out] bg-paper dark:bg-paper-dark">
+      <WorldMap
+        filledCcn3s={completedCcn3s}
+        currentCcn3={currentCcn3}
+        wrongCcn3s={wrongCcn3s}
+        focusCcn3s={poolCcn3s}
+        capitalDots={capitalDots}
+        pointCountries={pointCountries}
+        autoZoomCcn3={currentCcn3}
+        alwaysInsetCcn3s={alwaysInsetCcn3s}
+        className="h-full w-full portrait:w-auto"
+      />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3 text-sm">
+        <button
+          onClick={() => onExit(null)}
+          className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+        >
+          ← End session
+        </button>
+        <div className="flex items-center gap-2">
+          <SoundToggle />
+          {skippedPending.length > 0 && (
+            <button
+              onClick={() => setShowSkipped((s) => !s)}
+              className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+            >
+              Skipped ({skippedPending.length})
+            </button>
+          )}
+          {combo >= 2 && (
+            <span
+              className={`pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 shadow-sm backdrop-blur dark:bg-paper-card-dark/95 ${comboClass(combo)}`}
+            >
+              🔥 ×{combo}
+            </span>
+          )}
+          <span className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink shadow-sm backdrop-blur dark:bg-paper-card-dark/95 dark:text-ink-dark">
+            {sessionType === "quiz" ? `${score.correct} / ${score.total} correct` : `${queue.length} left`}
+          </span>
+        </div>
+      </div>
+
+      {showSkipped ? (
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4">
+          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
+            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
+            <ul className="space-y-2">
+              {skippedPending.map((q) => (
+                <li key={questionKey(q)} className="flex items-center justify-between text-sm">
+                  <span className="text-ink-soft dark:text-ink-soft-dark">{promptFor(q)}</span>
+                  <button
+                    onClick={() => jumpTo(q)}
+                    className={`ml-3 shrink-0 rounded px-2 py-1 text-xs text-white ${accentSolidClass(ACCENT)}`}
+                  >
+                    Try now
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+          <form onSubmit={handleSubmit} className="pointer-events-auto w-full max-w-md space-y-2">
+            <div className="flex overflow-hidden rounded-md bg-paper-card/95 shadow-sm backdrop-blur dark:bg-paper-card-dark/95">
+              <div className="flex w-14 shrink-0 items-center justify-center border-r-2 border-dashed border-border py-3 text-2xl dark:border-border-dark">
+                {safeToReveal ? current.country.flag : "✈"}
+              </div>
+              <div className="flex flex-1 items-center justify-center px-4 py-3 text-center">
+                {feedback === "incorrect" ? (
+                  <div className="space-y-1">
+                    {roastMessage && (
+                      <p className="text-xs italic text-ink-soft dark:text-ink-soft-dark">{roastMessage}</p>
+                    )}
+                    <p className="font-serif text-xl text-cat-red dark:text-cat-red-dark">
+                      Not quite — it's {expectedAnswer(current)}.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="font-serif text-xl text-ink dark:text-ink-dark">{promptFor(current)}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="relative flex items-center gap-2">
+              <button
+                type="button"
+                onClick={giveUp}
+                disabled={feedback !== "idle"}
+                title="Give up"
+                aria-label="Give up"
+                className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-cat-red shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 dark:bg-paper-card-dark/95 dark:text-cat-red-dark ${
+                  feedback === "idle" ? "opacity-100" : "pointer-events-none spin-slow opacity-40"
+                }`}
+              >
+                🏳️
+              </button>
+
+              <div className="relative flex-1">
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  readOnly={feedback !== "idle"}
+                  placeholder="Type your answer"
+                  className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
+                    feedback === "correct" ? "border-cat-green dark:border-cat-green-dark" : "border-border dark:border-border-dark"
+                  } ${feedback === "incorrect" ? "shake-subtle" : ""}`}
+                />
+                {feedback === "idle" && (
+                  <button
+                    type="submit"
+                    aria-label="Submit answer"
+                    className={`absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow-md transition-transform hover:scale-105 ${accentSolidClass(ACCENT)}`}
+                  >
+                    ✈
+                  </button>
+                )}
+                {feedback === "correct" && (
+                  <span
+                    aria-hidden="true"
+                    className="pop-in absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-cat-green text-white shadow-md dark:bg-cat-green-dark"
+                  >
+                    ✓
+                  </span>
+                )}
+              </div>
+
+              <button
+                ref={nextButtonRef}
+                type="button"
+                onClick={() => {
+                  if (feedback === "idle") skip();
+                  else if (feedback === "incorrect") advance();
+                }}
+                disabled={feedback === "correct"}
+                title={feedback === "incorrect" ? "Next question" : "Skip"}
+                aria-label={feedback === "incorrect" ? "Next question" : "Skip"}
+                className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full shadow-sm transition-all duration-300 hover:scale-105 ${
+                  feedback === "incorrect"
+                    ? `text-white shadow-md ${accentSolidClass(ACCENT)}`
+                    : "bg-paper-card/95 text-ink-soft backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+                } ${feedback === "correct" ? "pointer-events-none spin-slow opacity-40" : ""}`}
+              >
+                {feedback === "incorrect" ? "→" : "⏭"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}

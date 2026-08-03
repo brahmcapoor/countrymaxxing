@@ -1,0 +1,186 @@
+@import url("https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600&family=Jost:wght@500;600;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Lora", ui-serif, Georgia, serif;
+  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  /* Uppercase/tracked chrome — labels, buttons, badges. A free geometric
+     substitute for the mid-century travel-poster lettering (Futura) this
+     redesign is drawing from. */
+  --font-label: "Jost", "Century Gothic", system-ui, sans-serif;
+
+  /* neutral chrome. Light and dark are the same navy hue, not two different
+     color families — light mode is a pale/airy tint of it (paper), dark
+     mode is the deep saturated end of it (ink-dark). Light mode's ink is
+     literally dark mode's paper color, and vice versa: the two themes are
+     inversions of one hue, which is also why the poster card's warm accent
+     gradient pops against either — the canvas itself stays cool in both. */
+  --color-paper: #edf1f9;
+  --color-paper-card: #f8fafd;
+  --color-ink: #15213a;
+  --color-ink-soft: #55617a;
+  --color-border: rgba(21, 33, 58, 0.14);
+
+  --color-paper-dark: #0b1730;
+  --color-paper-card-dark: #12294a;
+  --color-ink-dark: #f7ead0;
+  --color-ink-soft-dark: #d4b97e;
+  --color-border-dark: rgba(247, 234, 208, 0.25);
+
+  /* validated 8-hue categorical set, fixed order — used for per-game identity.
+     Red/yellow/aqua (the three CountryMaxxing actually uses) pushed more
+     saturated for a bolder poster feel; the rest untouched. */
+  --color-cat-blue: #2a78d6;
+  --color-cat-blue-dark: #3987e5;
+  --color-cat-orange: #eb6834;
+  --color-cat-orange-dark: #d95926;
+  --color-cat-aqua: #009e72;
+  --color-cat-aqua-dark: #23d6a0;
+  --color-cat-yellow: #f0a600;
+  --color-cat-yellow-dark: #f7b52a;
+  --color-cat-magenta: #e87ba4;
+  --color-cat-magenta-dark: #d55181;
+  --color-cat-green: #008300;
+  --color-cat-green-dark: #008300;
+  --color-cat-violet: #4a3aa7;
+  --color-cat-violet-dark: #9085e9;
+  --color-cat-red: #d1301c;
+  --color-cat-red-dark: #f2603c;
+}
+
+:root {
+  color-scheme: light dark;
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: var(--color-paper-dark);
+    color: var(--color-ink-dark);
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  font-family: var(--font-sans);
+}
+
+@keyframes pop-in {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.map-pop-in {
+  transform-box: fill-box;
+  transform-origin: center;
+  /* Smooth decelerating ease with no spring overshoot — a gentle grow-in
+     rather than a snappy bounce. */
+  animation: pop-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Same grow-in as .map-pop-in but for ordinary HTML elements — fill-box is
+   an SVG-only transform box and does nothing (or misbehaves) outside it. */
+.pop-in {
+  transform-origin: center;
+  animation: pop-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes swoop-in {
+  from {
+    transform: scale(1.15) translateY(-16px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-4px);
+  }
+  40%,
+  60% {
+    transform: translateX(4px);
+  }
+}
+
+.shake-once {
+  animation: shake 0.4s;
+}
+
+@keyframes shake-subtle {
+  10%,
+  90% {
+    transform: translateX(-0.5px);
+  }
+  20%,
+  80% {
+    transform: translateX(1px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-2px);
+  }
+  40%,
+  60% {
+    transform: translateX(2px);
+  }
+}
+
+.shake-subtle {
+  animation: shake-subtle 0.35s;
+}
+
+@keyframes idle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A slow idle turn for controls that are momentarily inactive (e.g. Skip/Give
+   up while feedback is showing) — stays put and visible rather than
+   vanishing, the motion itself reads as "not clickable right now." */
+.spin-slow {
+  animation: idle-spin 1.6s linear infinite;
+}
+
+@keyframes pin-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+/* The expanding ring half of a dropped map pin (see WorldMap.tsx's
+   `pinCcn3s`) — a classic "locate me" pulse so a handful of late-game hint
+   markers read as active pins, not just more dots on the map. */
+.pin-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pin-pulse 1.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
