@@ -3,11 +3,16 @@ import { regions, type Country } from "../../data/countries";
 import { accentSolidClass, accentTextClass, type CategoricalHue } from "../../core/palette";
 import { Confetti } from "../../components/Confetti";
 import { DarkModeToggle } from "../../components/DarkModeToggle";
-import { playFanfare } from "../../core/sound";
+import { SlideToDepart } from "../../components/SlideToDepart";
+import { playFanfare, playStampThunk } from "../../core/sound";
+import { stampRegion } from "../../core/passport";
+import { randomTagline } from "../../data/taglines";
+import { randomBrag } from "../../data/brags";
 import { NameAllPlay } from "./NameAllPlay";
 import { MapIdentifyPlay, type MapIdentifyResult } from "./MapIdentifyPlay";
 import { PromptAndAnswerPlay, type PromptAndAnswerResult } from "./PromptAndAnswerPlay";
 import { BorderPlay, type BorderResult } from "./BorderPlay";
+import { PassportPage } from "./PassportPage";
 import {
   borderEligiblePool,
   nameAllListLabel,
@@ -86,7 +91,10 @@ function DeclareCheckbox({
 }
 
 export function CountryMaxxing() {
-  const [phase, setPhase] = useState<"setup" | "play" | "summary">("setup");
+  const [phase, setPhase] = useState<"setup" | "play" | "summary" | "passport">("setup");
+  // One picked per mount, not per render — re-rolling on every keystroke in
+  // the setup form would be distracting rather than a nice surprise.
+  const [tagline] = useState(randomTagline);
   const [format, setFormat] = useState<Format>("name-all");
   const [sessionType, setSessionType] = useState<SessionType>("learn");
   const [directionSetting, setDirectionSetting] = useState<DirectionSetting>("mixed");
@@ -108,6 +116,7 @@ export function CountryMaxxing() {
     { cca3: string; region: string; label: string; flag: string }[] | null
   >(null);
   const [celebrate, setCelebrate] = useState(false);
+  const [bragLine, setBragLine] = useState<string | null>(null);
 
   const regionPool = poolForRegions(selectedRegions);
   // Reads localStorage stats, so it's computed fresh each render rather than
@@ -155,9 +164,19 @@ export function CountryMaxxing() {
     if (!isCelebration) return;
     playFanfare();
     setCelebrate(true);
+    setBragLine(randomBrag());
     const timeout = setTimeout(() => setCelebrate(false), 2600);
     return () => clearTimeout(timeout);
   }, [isCelebration]);
+
+  // Only a single-region selection maps cleanly onto one passport stamp —
+  // a mixed-region session finishing 100% doesn't tell us which region (if
+  // any) was actually mastered end to end.
+  function maybeStampPassport() {
+    if (selectedRegions.size !== 1) return;
+    const [region] = selectedRegions;
+    if (region) stampRegion(region);
+  }
 
   function toggleRegion(region: string) {
     setSelectedRegions((prev) => {
@@ -168,9 +187,16 @@ export function CountryMaxxing() {
     });
   }
 
+  // A brief pause after the slide-to-depart handle snaps to the end, so its
+  // own snap animation is visible before the screen changes underneath it.
+  const DEPART_SNAP_MS = 220;
+
   function startSession() {
-    setRemainingOnGiveUp(null);
-    setPhase("play");
+    playStampThunk();
+    setTimeout(() => {
+      setRemainingOnGiveUp(null);
+      setPhase("play");
+    }, DEPART_SNAP_MS);
   }
 
   // Restarts with the exact settings/pool just used, skipping the trip back
@@ -178,6 +204,7 @@ export function CountryMaxxing() {
   // change unmounts the summary tree and mounts a fresh one), so state like
   // the shuffled queue and score are already guaranteed to reset.
   function playAgain() {
+    playStampThunk();
     setScore({ correct: 0, total: 0 });
     setNameAllResult(null);
     setRemainingOnGiveUp(null);
@@ -191,6 +218,8 @@ export function CountryMaxxing() {
     }
     setNameAllResult(result);
     setPhase("summary");
+    playStampThunk();
+    if (result.missed.length === 0) maybeStampPassport();
   }
 
   function handleMapIdentifyExit(result: MapIdentifyResult | null) {
@@ -201,6 +230,10 @@ export function CountryMaxxing() {
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
     setPhase("summary");
+    playStampThunk();
+    const success =
+      sessionType === "learn" ? !result.remaining || result.remaining.length === 0 : result.correct === result.total;
+    if (success) maybeStampPassport();
   }
 
   function handlePromptAndAnswerExit(result: PromptAndAnswerResult | null) {
@@ -211,6 +244,10 @@ export function CountryMaxxing() {
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
     setPhase("summary");
+    playStampThunk();
+    const success =
+      sessionType === "learn" ? !result.remaining || result.remaining.length === 0 : result.correct === result.total;
+    if (success) maybeStampPassport();
   }
 
   function handleBorderExit(result: BorderResult | null) {
@@ -221,6 +258,10 @@ export function CountryMaxxing() {
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
     setPhase("summary");
+    playStampThunk();
+    const success =
+      sessionType === "learn" ? !result.remaining || result.remaining.length === 0 : result.correct === result.total;
+    if (success) maybeStampPassport();
   }
 
   if (phase === "summary" && format === "name-all" && nameAllResult) {
@@ -254,6 +295,9 @@ export function CountryMaxxing() {
         <p className="font-serif text-2xl text-ink dark:text-ink-dark">
           {missed.length === 0 ? "Named them all! 🎉" : `${found.length} / ${found.length + missed.length} found`}
         </p>
+        {missed.length === 0 && bragLine && (
+          <p className="mt-2 text-ink-soft dark:text-ink-soft-dark">{bragLine}</p>
+        )}
         {missed.length > 0 && (
           <div className="mt-5 space-y-4 text-left">
             {sortedSummaryGroups.map(([region, items]) => (
@@ -356,9 +400,7 @@ export function CountryMaxxing() {
           ) : (
             <>
               <p className="font-serif text-2xl text-ink dark:text-ink-dark">All mastered! 🎉</p>
-              <p className="mt-2 text-ink-soft dark:text-ink-soft-dark">
-                You got every item in this selection right.
-              </p>
+              <p className="mt-2 text-ink-soft dark:text-ink-soft-dark">{bragLine ?? "You got every item in this selection right."}</p>
             </>
           )
         ) : (
@@ -370,6 +412,9 @@ export function CountryMaxxing() {
               {score.total > 0 ? Math.round((score.correct / score.total) * 100) : 0}%
               {perfectQuizWin && " — perfect! 🎉"}
             </p>
+            {perfectQuizWin && bragLine && (
+              <p className="mt-1 text-ink-soft dark:text-ink-soft-dark">{bragLine}</p>
+            )}
           </>
         )}
         <button
@@ -431,6 +476,10 @@ export function CountryMaxxing() {
         onExit={handleBorderExit}
       />
     );
+  }
+
+  if (phase === "passport") {
+    return <PassportPage onClose={() => setPhase("setup")} />;
   }
 
   const startDisabled = pool.length === 0;
@@ -505,14 +554,20 @@ export function CountryMaxxing() {
           <circle cx="120" cy="120" r="90" className="fill-paper-card/25 dark:fill-paper-card-dark/20" />
         </svg>
 
+        <button
+          onClick={() => setPhase("passport")}
+          title="Your passport"
+          aria-label="Your passport"
+          className="pointer-events-auto absolute left-3 top-3 rounded-full bg-white/15 px-3 py-1.5 text-white shadow-sm backdrop-blur hover:bg-white/25"
+        >
+          🛂
+        </button>
         <DarkModeToggle className="absolute right-3 top-3 rounded-full bg-white/15 px-3 py-1.5 text-white shadow-sm backdrop-blur hover:bg-white/25" />
 
         <h1 className="relative font-serif text-4xl font-bold tracking-tight text-white drop-shadow-sm sm:text-5xl md:text-6xl">
           CountryMaxxing
         </h1>
-        <p className="font-label relative mt-2 text-xs uppercase tracking-[0.14em] text-white/85">
-          197 Countries. Zero Frequent Flyer Miles.
-        </p>
+        <p className="font-label relative mt-2 text-xs uppercase tracking-[0.14em] text-white/85">{tagline}</p>
       </header>
 
       <div className="mt-9">
@@ -784,29 +839,50 @@ export function CountryMaxxing() {
         </div>
       )}
 
-      <div
-        className={`mt-10 flex overflow-hidden rounded-2xl shadow-lg transition-all duration-300 ${startDisabled ? "opacity-40" : "hover:-translate-y-0.5 hover:shadow-xl"}`}
-      >
-        <button
-          onClick={startSession}
-          disabled={startDisabled}
-          className={`flex-1 cursor-pointer px-7 py-6 text-left transition-opacity hover:opacity-90 disabled:cursor-not-allowed ${accentSolidClass(ACCENT)} text-white`}
-        >
-          <span className="font-label block text-base font-bold uppercase tracking-wide">
-            {startDisabled ? "No countries selected" : "Depart"}
-          </span>
-          {!startDisabled && (
-            <span className="mt-0.5 block text-xs font-normal opacity-85">
-              {pool.length} countries selected
-              {format !== "name-all" && ` · ${sessionType === "learn" ? "Learn" : "Quiz"} mode`}
-            </span>
-          )}
-        </button>
+      {/* Two different Depart controls for two different input types, not
+          two different screen sizes — a narrow desktop window still has a
+          precise mouse/trackpad, and a wide touchscreen tablet still
+          doesn't. coarse-pointer: (see index.css) reflects the actual
+          primary pointing device via the `pointer` media feature. */}
+      <div className="coarse-pointer:hidden">
         <div
-          className={`flex w-16 items-center justify-center border-l-2 border-dashed border-white/40 text-xl text-white brightness-90 ${accentSolidClass(ACCENT)}`}
+          className={`mt-10 flex overflow-hidden rounded-2xl shadow-lg transition-all duration-300 ${startDisabled ? "opacity-40" : "hover:-translate-y-0.5 hover:shadow-xl"}`}
         >
-          ✈
+          <button
+            onClick={startSession}
+            disabled={startDisabled}
+            className={`flex-1 cursor-pointer px-7 py-6 text-left transition-opacity hover:opacity-90 disabled:cursor-not-allowed ${accentSolidClass(ACCENT)} text-white`}
+          >
+            <span className="font-label block text-base font-bold uppercase tracking-wide">
+              {startDisabled ? "No countries selected" : "Depart"}
+            </span>
+            {!startDisabled && (
+              <span className="mt-0.5 block text-xs font-normal opacity-85">
+                {pool.length} countries selected
+                {format !== "name-all" && ` · ${sessionType === "learn" ? "Learn" : "Quiz"} mode`}
+              </span>
+            )}
+          </button>
+          <div
+            className={`flex w-16 items-center justify-center border-l-2 border-dashed border-white/40 text-xl text-white brightness-90 ${accentSolidClass(ACCENT)}`}
+          >
+            ✈
+          </div>
         </div>
+      </div>
+
+      <div className="hidden coarse-pointer:block">
+        <SlideToDepart
+          label={startDisabled ? "No countries selected" : "Depart"}
+          sublabel={
+            startDisabled
+              ? undefined
+              : `${pool.length} countries selected${format !== "name-all" ? ` · ${sessionType === "learn" ? "Learn" : "Quiz"} mode` : ""}`
+          }
+          disabled={startDisabled}
+          accent={ACCENT}
+          onComplete={startSession}
+        />
       </div>
     </div>
   );

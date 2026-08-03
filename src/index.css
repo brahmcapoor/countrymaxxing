@@ -8,6 +8,12 @@
    an explicit theme, so this is additive, not a behavior change on its own. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* True for touchscreens, false for mouse/trackpad — deliberately NOT a
+   viewport-width breakpoint, since a narrow desktop window still has a
+   precise pointer and a wide touchscreen tablet still doesn't. Drives which
+   of the two Depart controls renders — see CountryMaxxing.tsx. */
+@custom-variant coarse-pointer (@media (pointer: coarse));
+
 @theme {
   --font-serif: "Lora", ui-serif, Georgia, serif;
   --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
@@ -189,4 +195,21 @@ body {
   transform-box: fill-box;
   transform-origin: center;
   animation: pin-pulse 1.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes idle-glow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.4);
+  }
+}
+
+/* A gentle breathing brightness pulse on the "you are here" current-question
+   country/marker — brightness rather than opacity, so the highlight stays
+   fully solid and reads as glowing instead of flickering translucent. */
+.current-pulse {
+  animation: idle-glow 1.8s ease-in-out infinite;
 }

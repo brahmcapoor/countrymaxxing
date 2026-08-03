@@ -79,7 +79,10 @@ function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, i
   if (isCurrent) {
     // The question currently on screen — a warm yellow so it reads as "you
     // are here" and doesn't get lost among already-answered countries.
-    return "fill-cat-yellow stroke-paper-card dark:fill-cat-yellow-dark dark:stroke-paper-card-dark";
+    // current-pulse gives it a slow idle brightness breathe so it stays
+    // easy to spot without demanding attention the way a flashing element
+    // would.
+    return "fill-cat-yellow stroke-paper-card dark:fill-cat-yellow-dark dark:stroke-paper-card-dark current-pulse";
   }
   if (isWrong) {
     // Answered incorrectly and not yet redeemed — full-strength (not faded

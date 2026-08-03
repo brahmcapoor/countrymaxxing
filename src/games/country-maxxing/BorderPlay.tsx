@@ -5,7 +5,7 @@ import { SoundToggle } from "../../components/SoundToggle";
 import { DarkModeToggle } from "../../components/DarkModeToggle";
 import { isCloseMatch } from "../../core/fuzzyMatch";
 import { accentSolidClass } from "../../core/palette";
-import { comboClass } from "../../core/combo";
+import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import { roastFor } from "../../data/roasts";
@@ -325,9 +325,10 @@ export function BorderPlay({
           )}
           {combo >= 2 && (
             <span
-              className={`pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 shadow-sm backdrop-blur dark:bg-paper-card-dark/95 ${comboClass(combo)}`}
+              key={comboTier(combo)}
+              className={`pop-in pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 shadow-sm backdrop-blur dark:bg-paper-card-dark/95 ${comboClass(combo)}`}
             >
-              🔥 ×{combo}
+              {comboEmoji(combo)} ×{combo}
             </span>
           )}
           <span className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink shadow-sm backdrop-blur dark:bg-paper-card-dark/95 dark:text-ink-dark">
