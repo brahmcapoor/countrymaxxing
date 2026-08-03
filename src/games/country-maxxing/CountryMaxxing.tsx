@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { regions, type Country } from "../../data/countries";
 import { accentSolidClass, accentTextClass, type CategoricalHue } from "../../core/palette";
 import { Confetti } from "../../components/Confetti";
+import { DarkModeToggle } from "../../components/DarkModeToggle";
 import { playFanfare } from "../../core/sound";
 import { NameAllPlay } from "./NameAllPlay";
 import { MapIdentifyPlay, type MapIdentifyResult } from "./MapIdentifyPlay";
@@ -503,6 +504,8 @@ export function CountryMaxxing() {
         >
           <circle cx="120" cy="120" r="90" className="fill-paper-card/25 dark:fill-paper-card-dark/20" />
         </svg>
+
+        <DarkModeToggle className="absolute right-3 top-3 rounded-full bg-white/15 px-3 py-1.5 text-white shadow-sm backdrop-blur hover:bg-white/25" />
 
         <h1 className="relative font-serif text-4xl font-bold tracking-tight text-white drop-shadow-sm sm:text-5xl md:text-6xl">
           CountryMaxxing

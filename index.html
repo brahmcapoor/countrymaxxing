@@ -1,6 +1,20 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      // Blocking and inline so the class is set before first paint — avoids
+      // a flash of the wrong theme. Kept in sync with core/theme.ts's
+      // storage key and fallback logic; small enough to duplicate rather
+      // than share a module with, since this has to run before any module
+      // script would load.
+      (function () {
+        try {
+          var stored = localStorage.getItem("countrymaxxing:theme");
+          var dark = stored === "dark" || (stored !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {}
+      })();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

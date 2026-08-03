@@ -2,6 +2,7 @@ import { useState } from "react";
 import { games } from "./core/gameRegistry";
 import { ListingCard } from "./components/ListingCard";
 import { CompassMark } from "./components/CompassMark";
+import { DarkModeToggle } from "./components/DarkModeToggle";
 
 function App() {
   const [activeGameId, setActiveGameId] = useState<string | null>(
@@ -40,7 +41,8 @@ function App() {
 
   return (
     <div className="min-h-svh bg-paper dark:bg-paper-dark">
-      <header className="mx-auto max-w-2xl px-6 pt-12 pb-6 text-center">
+      <header className="relative mx-auto max-w-2xl px-6 pt-12 pb-6 text-center">
+        <DarkModeToggle className="absolute right-4 top-4 rounded-full bg-paper-card px-3 py-1.5 shadow-sm dark:bg-paper-card-dark" />
         <h1 className="font-serif text-4xl font-semibold text-ink dark:text-ink-dark">
           Games
         </h1>

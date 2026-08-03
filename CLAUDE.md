@@ -294,9 +294,25 @@ drawn from real travel/cartography ephemera on purpose, not generic
 cut it; the personality lives in copy and motif, not a character.
 
 Both themes are real work, not a naive invert — `@theme` defines light
-values, `@media (prefers-color-scheme: dark)` redefines the same tokens for
-dark. There's no in-app light/dark toggle; it follows the OS/browser
-preference only.
+values, and every component pairs each utility with its `dark:` counterpart
+by hand (`text-ink dark:text-ink-dark`, etc.) rather than swapping a single
+token.
+
+**Theme resolution** (`core/theme.ts`): Tailwind's `dark:` variant is
+repointed from the default `prefers-color-scheme` media query to a `.dark`
+class on `<html>` via `@custom-variant dark (&:where(.dark, .dark *));` in
+`index.css` — this is what makes an explicit override possible, since a
+media query can't be overridden by a click. `theme.ts` still *defaults*
+the class from the OS preference and follows it live via a
+`matchMedia("change")` listener, but only until `setTheme()` stores an
+explicit choice (`countrymaxxing:theme` in localStorage) — after that the
+stored choice wins and the listener no-ops. `index.html` has a small
+blocking inline `<script>` duplicating the same read-storage-or-fall-back-
+to-system logic, applied before first paint — it can't import `theme.ts`
+since it has to run before any module script loads, so if the storage key
+or fallback logic ever changes, update both places. `<DarkModeToggle>`
+(mirrors `SoundToggle`'s pattern) sits in every play screen's top bar plus
+the setup screen's hero and the (currently unreachable) shelf header.
 
 ## Testing
 

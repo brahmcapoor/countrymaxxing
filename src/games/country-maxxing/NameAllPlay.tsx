@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type FormEvent } from "react";
 import { countries, type Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
+import { DarkModeToggle } from "../../components/DarkModeToggle";
 import { accentSolidClass } from "../../core/palette";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import {
@@ -220,6 +221,7 @@ export function NameAllPlay({
             ← End session
           </button>
           <div className="flex items-center gap-2">
+            <DarkModeToggle />
             <SoundToggle />
             {canDropPins && (
               <button

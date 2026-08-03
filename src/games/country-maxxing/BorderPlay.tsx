@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { countries, type Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
+import { DarkModeToggle } from "../../components/DarkModeToggle";
 import { isCloseMatch } from "../../core/fuzzyMatch";
 import { accentSolidClass } from "../../core/palette";
 import { comboClass } from "../../core/combo";
@@ -312,6 +313,7 @@ export function BorderPlay({
           ← End session
         </button>
         <div className="flex items-center gap-2">
+          <DarkModeToggle />
           <SoundToggle />
           {skippedPending.length > 0 && (
             <button

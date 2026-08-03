@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
+import { DarkModeToggle } from "../../components/DarkModeToggle";
 import { isCloseMatch, isExactMatch } from "../../core/fuzzyMatch";
 import { accentSolidClass } from "../../core/palette";
 import { comboClass } from "../../core/combo";
@@ -219,6 +220,7 @@ export function MapIdentifyPlay({
           ← End session
         </button>
         <div className="flex items-center gap-2">
+          <DarkModeToggle />
           <SoundToggle />
           {skippedPending.length > 0 && (
             <button
