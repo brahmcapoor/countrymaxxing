@@ -7,6 +7,7 @@ import { isCloseMatch } from "../../core/fuzzyMatch";
 import { accentSolidClass } from "../../core/palette";
 import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
+import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { recordAttempt } from "../../core/stats";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import { roastFor } from "../../data/roasts";
@@ -63,6 +64,15 @@ export function PromptAndAnswerPlay({
   // its own color, separate from "done." Getting it right on a requeued
   // attempt (Learn mode) moves it into completedCcn3s and out of here.
   const [wrongCcn3s, setWrongCcn3s] = useState<Set<string>>(new Set());
+
+  // On iOS Safari, 100dvh doesn't shrink for the on-screen keyboard, so a
+  // bottom-anchored input can end up hidden behind it — this tracks the real
+  // covered height so the input can reposition above it, and doubles as the
+  // signal to shrink the map and give the answer panel more room while
+  // typing (the map isn't the question here, unlike Terra Incognita).
+  const keyboardInset = useKeyboardInset();
+  const isTyping = keyboardInset > 0;
+  const bottomBarStyle = isTyping ? { bottom: keyboardInset + 16 } : undefined;
 
   const inputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
@@ -237,7 +247,7 @@ export function PromptAndAnswerPlay({
         pointCountries={pointCountries}
         autoZoomCcn3={currentCcn3}
         alwaysInsetCcn3s={alwaysInsetCcn3s}
-        className="h-full w-full portrait:w-auto"
+        className={`w-full portrait:w-auto transition-[height] duration-300 ${isTyping ? "h-[35dvh]" : "h-full"}`}
       />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3 text-sm">
@@ -273,7 +283,7 @@ export function PromptAndAnswerPlay({
       </div>
 
       {showSkipped ? (
-        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4">
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
           <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
             <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
             <ul className="space-y-2">
@@ -292,7 +302,10 @@ export function PromptAndAnswerPlay({
           </div>
         </div>
       ) : (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
+          style={bottomBarStyle}
+        >
           <form onSubmit={handleSubmit} className="pointer-events-auto w-full max-w-md space-y-2">
             <div className="flex overflow-hidden rounded-md bg-paper-card/95 shadow-sm backdrop-blur dark:bg-paper-card-dark/95">
               <div className="flex w-14 shrink-0 items-center justify-center border-r-2 border-dashed border-border py-3 text-2xl dark:border-border-dark">

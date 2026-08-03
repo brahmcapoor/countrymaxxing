@@ -7,6 +7,7 @@ import { isCloseMatch, isExactMatch } from "../../core/fuzzyMatch";
 import { accentSolidClass } from "../../core/palette";
 import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
+import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import { roastFor } from "../../data/roasts";
 import {
@@ -55,6 +56,14 @@ export function MapIdentifyPlay({
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [combo, setCombo] = useState(0);
   const [roastMessage, setRoastMessage] = useState<string | null>(null);
+
+  // See PromptAndAnswerPlay.tsx's matching comment — same iOS Safari
+  // keyboard-covers-input fix. Unlike the other modes, the map here is NOT
+  // shrunk while typing — it's the actual question (you're identifying the
+  // highlighted country), so hiding more of it while answering would work
+  // against the mode instead of just tidying up space.
+  const keyboardInset = useKeyboardInset();
+  const bottomBarStyle = keyboardInset > 0 ? { bottom: keyboardInset + 16 } : undefined;
 
   const countryInputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
@@ -245,7 +254,7 @@ export function MapIdentifyPlay({
       </div>
 
       {showSkipped ? (
-        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4">
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
           <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
             <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped countries</p>
             <ul className="space-y-2">
@@ -264,7 +273,10 @@ export function MapIdentifyPlay({
           </div>
         </div>
       ) : (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
+          style={bottomBarStyle}
+        >
           <form onSubmit={handleSubmit} className="pointer-events-auto w-full max-w-md">
             <div className="relative flex items-center gap-2">
               {feedback === "answered" && result && (

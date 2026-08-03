@@ -5,6 +5,7 @@ import { SoundToggle } from "../../components/SoundToggle";
 import { DarkModeToggle } from "../../components/DarkModeToggle";
 import { accentSolidClass } from "../../core/palette";
 import { playCorrect, playIncorrect } from "../../core/sound";
+import { useKeyboardInset } from "../../core/useKeyboardInset";
 import {
   nameAllCandidates,
   nameAllLabel,
@@ -54,6 +55,13 @@ export function NameAllPlay({
   const [showMissing, setShowMissing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // See PromptAndAnswerPlay.tsx's matching comment — same iOS Safari
+  // keyboard-covers-input fix, plus shrinking the map to give the answer
+  // panel more room (Manifest's map isn't the question, just a reference).
+  const keyboardInset = useKeyboardInset();
+  const isTyping = keyboardInset > 0;
+  const bottomBarStyle = isTyping ? { bottom: keyboardInset + 16 } : undefined;
 
   const remaining = useMemo(() => pool.filter((c) => !foundCca3s.has(c.cca3)), [pool, foundCca3s]);
   const found = useMemo(() => pool.filter((c) => foundCca3s.has(c.cca3)), [pool, foundCca3s]);
@@ -210,7 +218,7 @@ export function NameAllPlay({
           capitalDots={capitalDots}
           pointCountries={pointCountries}
           hintPins={hintPins}
-          className="h-full w-full portrait:w-auto"
+          className={`w-full portrait:w-auto transition-[height] duration-300 ${isTyping ? "h-[35dvh]" : "h-full"}`}
         />
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3 text-sm">
@@ -253,7 +261,10 @@ export function NameAllPlay({
           </div>
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex items-center justify-center gap-3 px-4">
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-4 flex items-center justify-center gap-3 px-4"
+          style={bottomBarStyle}
+        >
           <form onSubmit={handleSubmit} className="pointer-events-auto relative w-full max-w-md">
             {hint && (
               <p

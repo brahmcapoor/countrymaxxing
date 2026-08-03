@@ -298,6 +298,32 @@ other three modes (see above) — same boarding-pass question box, same
 merged Skip/Give-up/Next icon buttons — despite its UI branching by question
 type, since that rule applies regardless of mode.
 
+## Mobile keyboard handling
+
+All four play screens use `useKeyboardInset()` (`core/useKeyboardInset.ts`)
+rather than trusting `h-dvh` alone. iOS Safari's `100dvh` doesn't shrink for
+the on-screen keyboard — it only accounts for browser chrome — so a
+`bottom-4` input can end up genuinely hidden behind the keyboard there, not
+just cramped. The hook tracks `window.visualViewport` directly (the real
+covered height, regardless of browser) and each screen applies it as an
+inline `style={{ bottom: keyboardInset + 16 }}` override on its bottom
+panel(s) once a keyboard is actually open.
+
+Three of the four also shrink the map (`h-[35dvh]` instead of `h-full`,
+animated) while `keyboardInset > 0`, trading map space for a bigger answer
+panel — safe because the map is supplementary there (One Stop, Manifest,
+Frontiers all ask a textual question). **Terra Incognita deliberately
+doesn't** — the map *is* the question there (you're identifying the
+highlighted country), so shrinking it while answering would work against
+the mode instead of just tidying up space. Don't copy the shrink into a
+future map-dependent mode without the same exception.
+
+Test this without a real device: `Object.defineProperty(window.
+visualViewport, 'height', { configurable: true, get: () => X })` then
+`window.visualViewport.dispatchEvent(new Event('resize'))` simulates a
+keyboard covering `realHeight - X` px — `delete` the property afterward to
+restore native behavior.
+
 ## Design direction
 
 Vintage travel-poster / atlas aesthetic: warm paper / deep-navy neutrals

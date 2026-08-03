@@ -7,6 +7,7 @@ import { isCloseMatch } from "../../core/fuzzyMatch";
 import { accentSolidClass } from "../../core/palette";
 import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
+import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import { roastFor } from "../../data/roasts";
 import {
@@ -64,6 +65,13 @@ export function BorderPlay({
   // been typed in so far. Reset whenever the current question changes.
   const [foundNeighborCca3s, setFoundNeighborCca3s] = useState<Set<string>>(new Set());
   const [hint, setHint] = useState<{ kind: "already" | "unknown" | "wrong"; text: string } | null>(null);
+
+  // See PromptAndAnswerPlay.tsx's matching comment — same iOS Safari
+  // keyboard-covers-input fix, plus shrinking the map to give the answer
+  // panel more room (Frontiers' questions are textual, not map-identify).
+  const keyboardInset = useKeyboardInset();
+  const isTyping = keyboardInset > 0;
+  const bottomBarStyle = isTyping ? { bottom: keyboardInset + 16 } : undefined;
 
   const inputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
@@ -301,7 +309,7 @@ export function BorderPlay({
           pointCountries={pointCountries}
           autoZoomCcn3={currentCcn3}
           alwaysInsetCcn3s={alwaysInsetCcn3s}
-          className="h-full w-full portrait:w-auto"
+          className={`w-full portrait:w-auto transition-[height] duration-300 ${isTyping ? "h-[35dvh]" : "h-full"}`}
         />
       )}
 
@@ -338,7 +346,7 @@ export function BorderPlay({
       </div>
 
       {showSkipped ? (
-        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4">
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
           <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
             <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
             <ul className="space-y-2">
@@ -359,6 +367,7 @@ export function BorderPlay({
       ) : (
         <div
           className={`pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4 ${!showMap ? "top-16" : ""}`}
+          style={bottomBarStyle}
         >
           <form onSubmit={handleSubmit} className="pointer-events-auto w-full max-w-md space-y-2">
             <div className="flex overflow-hidden rounded-md bg-paper-card/95 shadow-sm backdrop-blur dark:bg-paper-card-dark/95">
