@@ -1,32 +1,31 @@
-# React + TypeScript + Vite
+# CountryMaxxing
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A geography trivia game covering all 197 commonly-quizzed countries, capitals,
+and borders. No backend — everything runs client-side, with progress tracked
+in `localStorage`.
 
-Currently, two official plugins are available:
+Four modes, picked from the setup screen:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **One Stop** — country ↔ capital, one at a time
+- **Manifest** — name every country (or capital) in your selected regions
+- **Terra Incognita** — identify the highlighted country on the map
+- **Frontiers** — name a country's neighbors, work backward from a set of
+  neighbors, or compare border lengths
 
-## React Compiler
+## Developing
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```
+npm install
+npm run dev              # dev server
+npx tsc -b --noEmit       # typecheck
+npx oxlint                # lint
+npm run build             # production build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Requires Node `^20.19.0 || >=22.12.0` (pinned via `.nvmrc`) — rolldown-vite's
+native binding fails to resolve outside that range.
+
+## Deploying
+
+Pushing to `main` builds and deploys to GitHub Pages automatically via
+`.github/workflows/deploy.yml`.
