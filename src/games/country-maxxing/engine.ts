@@ -190,8 +190,6 @@ export interface BorderQuestion {
   extreme?: "longest" | "shortest";
 }
 
-const BORDER_QUESTION_TYPES: BorderQuestionType[] = ["name-neighbors", "reverse-lookup", "longest-shortest"];
-
 function neighborsOf(country: Country): Country[] {
   return country.borders
     .map((cca3) => allCountries.find((c) => c.cca3 === cca3))
@@ -206,12 +204,50 @@ export function borderQuestionKey(question: BorderQuestion): string {
   return statTag(question.country, borderTag(question.type));
 }
 
-function eligibleTypesFor(neighborCount: number): BorderQuestionType[] {
-  return neighborCount >= 2
-    ? BORDER_QUESTION_TYPES
-    : neighborCount >= 1
-      ? (["name-neighbors", "reverse-lookup"] as const)
-      : [];
+// "reverse-lookup" only has one correct answer if the subject is the *only*
+// country with that exact set of neighbors — several real countries share an
+// identical neighbor set (Papua New Guinea and Timor-Leste both border only
+// Indonesia; San Marino and Vatican City both border only Italy; Bhutan and
+// Nepal both border exactly {China, India}; UAE and Yemen both border
+// exactly {Oman, Saudi Arabia}), which makes "which country borders all of:
+// X" genuinely ambiguous — a correct-but-unintended guess would be marked
+// wrong. Checked against the full dataset, not the current region pool,
+// since narrowing the pool doesn't change whether two countries actually
+// share a neighbor set.
+const neighborSignatureCounts = new Map<string, number>();
+let signatureCountsBuilt = false;
+
+function neighborSignature(neighbors: Country[]): string {
+  return neighbors
+    .map((n) => n.cca3)
+    .sort()
+    .join(",");
+}
+
+function ensureSignatureCounts(): void {
+  if (signatureCountsBuilt) return;
+  signatureCountsBuilt = true;
+  for (const c of allCountries) {
+    const sig = neighborSignature(neighborsOf(c));
+    if (!sig) continue;
+    neighborSignatureCounts.set(sig, (neighborSignatureCounts.get(sig) ?? 0) + 1);
+  }
+}
+
+function uniquelyIdentifiedByNeighbors(neighbors: Country[]): boolean {
+  ensureSignatureCounts();
+  const sig = neighborSignature(neighbors);
+  return sig !== "" && neighborSignatureCounts.get(sig) === 1;
+}
+
+function eligibleTypesFor(neighbors: Country[]): BorderQuestionType[] {
+  const types: BorderQuestionType[] = [];
+  if (neighbors.length >= 1) {
+    types.push("name-neighbors");
+    if (uniquelyIdentifiedByNeighbors(neighbors)) types.push("reverse-lookup");
+  }
+  if (neighbors.length >= 2) types.push("longest-shortest");
+  return types;
 }
 
 // Filters down to only the countries that can actually get a question under
@@ -225,7 +261,7 @@ function eligibleTypesFor(neighborCount: number): BorderQuestionType[] {
 // place get silently counted as "mastered" on give-up instead of excluded.
 export function borderEligiblePool(pool: Country[], typeSetting: BorderQuestionTypeSetting): Country[] {
   return pool.filter((c) => {
-    const eligible = eligibleTypesFor(neighborsOf(c).length);
+    const eligible = eligibleTypesFor(neighborsOf(c));
     return typeSetting === "mixed" ? eligible.length > 0 : eligible.includes(typeSetting);
   });
 }
@@ -237,7 +273,7 @@ export function buildBorderQueue(pool: Country[], typeSetting: BorderQuestionTyp
   const remaining: BorderQuestion[] = [];
   for (const country of pool) {
     const neighbors = neighborsOf(country);
-    const eligible = eligibleTypesFor(neighbors.length);
+    const eligible = eligibleTypesFor(neighbors);
     if (eligible.length === 0) continue;
     const type =
       typeSetting === "mixed"
@@ -264,6 +300,9 @@ export function borderPromptFor(question: BorderQuestion): string {
     return `Which countries border ${question.country.name}?`;
   }
   if (question.type === "reverse-lookup") {
+    if (question.neighbors.length === 1) {
+      return `Which country's only land border is with ${question.neighbors[0]!.name}?`;
+    }
     const names = question.neighbors.map((n) => n.name).join(", ");
     return `Which country borders all of: ${names}?`;
   }
@@ -304,7 +343,7 @@ export function recordBorderAttempt(question: BorderQuestion, correct: boolean):
 export function weakPoolForBorders(pool: Country[], typeSetting: BorderQuestionTypeSetting): Country[] {
   return pool.filter((c) => {
     const neighbors = neighborsOf(c);
-    const eligible = eligibleTypesFor(neighbors.length);
+    const eligible = eligibleTypesFor(neighbors);
     const types = typeSetting === "mixed" ? eligible : eligible.includes(typeSetting) ? [typeSetting] : [];
     return types.some((t) => isWeak(c, borderTag(t)));
   });

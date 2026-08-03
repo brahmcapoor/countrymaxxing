@@ -257,7 +257,22 @@ zero new summary code.
 
 Not every country is eligible for every type — island nations with zero land
 neighbors are eligible for none; countries with exactly one neighbor skip
-`longest-shortest` (nothing to compare). **`borderEligiblePool(pool,
+`longest-shortest` (nothing to compare); `reverse-lookup` additionally
+requires the subject to be the *only* country in the whole dataset with that
+exact neighbor set (`uniquelyIdentifiedByNeighbors()`), checked globally, not
+against the current region pool. Several real countries share an identical
+neighbor set — Papua New Guinea/Timor-Leste (both border only Indonesia),
+San Marino/Vatican City (both border only Italy), Bhutan/Nepal (both border
+exactly {China, India}), UAE/Yemen (both border exactly {Oman, Saudi
+Arabia}) — which made "which country borders all of: X" genuinely
+ambiguous for any of them: a correct-but-unintended guess got marked wrong.
+This is computed dynamically off `allCountries`, not a hardcoded exclusion
+list, so it self-corrects if the country/border data ever changes. **A
+single-neighbor `reverse-lookup` question also gets its own phrasing** —
+"Which country's only land border is with X?" instead of the "borders all
+of: X" phrasing built for 2+, which read oddly for exactly one clue.
+
+**`borderEligiblePool(pool,
 typeSetting)`, not the raw region pool, is the count of "how many questions
 this session can contain."** Real bug hit building this: Border mode silently
 skips ineligible countries from its own internal queue, but if something
