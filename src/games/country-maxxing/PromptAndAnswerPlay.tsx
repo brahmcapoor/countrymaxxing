@@ -10,6 +10,7 @@ import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
 import { recordAttempt } from "../../core/stats";
+import { letterHint } from "../../core/letterHint";
 import {
   reviewList,
   useCategoryTally,
@@ -53,11 +54,13 @@ export function PromptAndAnswerPlay({
   pool,
   directionSetting,
   sessionType,
+  letterHints,
   onExit,
 }: {
   pool: Country[];
   directionSetting: DirectionSetting;
   sessionType: SessionType;
+  letterHints: boolean;
   onExit: (result: PromptAndAnswerResult | null) => void;
 }) {
   const [queue, setQueue] = useState<Question[]>(() => buildQueue(pool, directionSetting));
@@ -388,7 +391,14 @@ export function PromptAndAnswerPlay({
                     {gaveUp ? `It's ${expectedAnswer(current)}.` : `Not quite — it's ${expectedAnswer(current)}.`}
                   </p>
                 ) : (
-                  <p className="font-serif text-xl text-ink dark:text-ink-dark">{promptFor(current)}</p>
+                  <div>
+                    <p className="font-serif text-xl text-ink dark:text-ink-dark">{promptFor(current)}</p>
+                    {letterHints && feedback === "idle" && (
+                      <p className="mt-1 font-mono text-sm tracking-wide text-ink-soft dark:text-ink-soft-dark">
+                        {letterHint(expectedAnswer(current))}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

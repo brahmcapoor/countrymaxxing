@@ -9,6 +9,7 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
+import { letterHint } from "../../core/letterHint";
 import {
   reviewList,
   useCategoryTally,
@@ -53,12 +54,14 @@ export function BorderPlay({
   typeSetting,
   sessionType,
   showMap,
+  letterHints,
   onExit,
 }: {
   pool: Country[];
   typeSetting: BorderQuestionTypeSetting;
   sessionType: SessionType;
   showMap: boolean;
+  letterHints: boolean;
   onExit: (result: BorderResult | null) => void;
 }) {
   const [queue, setQueue] = useState<BorderQuestion[]>(() => buildBorderQueue(pool, typeSetting));
@@ -486,7 +489,16 @@ export function BorderPlay({
                     )}
                   </div>
                 ) : (
-                  <p className="font-serif text-lg text-ink dark:text-ink-dark">{borderPromptFor(current)}</p>
+                  <div>
+                    <p className="font-serif text-lg text-ink dark:text-ink-dark">{borderPromptFor(current)}</p>
+                    {/* name-neighbors has no single blank to scaffold — it's a
+                        multi-answer list, not one expected string. */}
+                    {!isNameNeighbors && letterHints && feedback === "idle" && (
+                      <p className="mt-1 font-mono text-sm tracking-wide text-ink-soft dark:text-ink-soft-dark">
+                        {letterHint(borderExpectedAnswer(current))}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

@@ -9,6 +9,7 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
+import { letterHint } from "../../core/letterHint";
 import {
   reviewList,
   useCategoryTally,
@@ -53,11 +54,13 @@ export function MapIdentifyPlay({
   pool,
   askCapital,
   sessionType,
+  letterHints,
   onExit,
 }: {
   pool: Country[];
   askCapital: boolean;
   sessionType: SessionType;
+  letterHints: boolean;
   onExit: (result: MapIdentifyResult | null) => void;
 }) {
   const [queue, setQueue] = useState<Country[]>(() => buildMapIdentifyQueue(pool));
@@ -408,6 +411,19 @@ export function MapIdentifyPlay({
                       {result.capitalCorrect ? "Capital correct!" : `Capital: it's ${current.capital}.`}
                     </p>
                   )}
+                </div>
+              )}
+
+              {/* Country hint deliberately omitted — that field tests shape
+                  recognition, and a letter scaffold would let you guess it
+                  from the word alone without ever looking at the map. The
+                  capital field is pure recall, same as One Stop, so it gets
+                  the same hint treatment. */}
+              {feedback === "idle" && letterHints && askCapital && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-full z-10 mb-2 rounded-md bg-paper-card/95 p-2 text-center shadow-sm backdrop-blur dark:bg-paper-card-dark/95">
+                  <p className="font-mono text-sm tracking-wide text-ink-soft dark:text-ink-soft-dark">
+                    {letterHint(current.capital)}
+                  </p>
                 </div>
               )}
 

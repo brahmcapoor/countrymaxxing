@@ -121,6 +121,7 @@ export function CountryMaxxing() {
   const [borderShowMap, setBorderShowMap] = useState(true);
   const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set(regions));
   const [focusOnWeakSpots, setFocusOnWeakSpots] = useState(false);
+  const [letterHints, setLetterHints] = useState(false);
   const [speedRoundEnabled, setSpeedRoundEnabled] = useState(false);
   const [speedRoundSeconds, setSpeedRoundSeconds] = useState<number>(600);
 
@@ -502,6 +503,7 @@ export function CountryMaxxing() {
         pool={pool}
         askCapital={askCapital}
         sessionType={sessionType}
+        letterHints={letterHints}
         onExit={handleMapIdentifyExit}
       />
     );
@@ -513,6 +515,7 @@ export function CountryMaxxing() {
         pool={pool}
         directionSetting={directionSetting}
         sessionType={sessionType}
+        letterHints={letterHints}
         onExit={handlePromptAndAnswerExit}
       />
     );
@@ -525,6 +528,7 @@ export function CountryMaxxing() {
         typeSetting={borderTypeSetting}
         sessionType={sessionType}
         showMap={borderShowMap}
+        letterHints={letterHints}
         onExit={handleBorderExit}
       />
     );
@@ -891,6 +895,18 @@ export function CountryMaxxing() {
           <p className="mt-1.5 pl-8 text-xs text-ink-soft dark:text-ink-soft-dark">
             A weak spot needs a few attempts and recent accuracy under 70% — your last few tries count
             for more than old ones, so a rough patch you've since gotten past clears out on its own.
+          </p>
+        </div>
+      )}
+
+      {format !== "name-all" && (
+        <div className="mt-8">
+          <DeclareCheckbox checked={letterHints} onChange={setLetterHints}>
+            Letter hints
+          </DeclareCheckbox>
+          <p className="mt-1.5 pl-8 text-xs text-ink-soft dark:text-ink-soft-dark">
+            Every question shows a hangman-style scaffold (some letters, some blanks) instead of a
+            blank field.
           </p>
         </div>
       )}
