@@ -13,6 +13,12 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Default globPatterns don't include woff2 — without this the
+      // self-hosted fonts (src/index.css) build fine but never make it into
+      // the service worker's precache, silently defeating the whole point.
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+      },
       manifest: {
         name: 'CountryMaxxing',
         short_name: 'CountryMaxxing',
