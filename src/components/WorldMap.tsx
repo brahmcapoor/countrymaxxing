@@ -110,24 +110,19 @@ function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, i
   }
   if (isWrong) {
     // Answered incorrectly and not yet redeemed — full-strength (not faded
-    // like "done") so it stands out as something to come back to. Dark mode
-    // can't reuse orange here: cat-orange-dark (#d95926) and cat-red-dark
-    // (#f2603c, "done"'s color there — see below) sit only ~5° apart in hue,
-    // reading as near-identical shades of orange-red side by side. Violet is
-    // maximally separated from both that red and the current-question
-    // yellow, and isn't otherwise used for a fill state in this component.
-    return "fill-cat-red stroke-paper-card dark:fill-cat-violet-dark dark:stroke-paper-card-dark";
+    // like "done") so it stands out as something to come back to. Red in
+    // both themes: it's the near-universal "this one's a problem" color, and
+    // reusing it for "done" (an earlier version of this dark-mode palette
+    // did, to match CountryMaxxing's own red accent) reads as backwards —
+    // a correct answer shouldn't share its color with a miss.
+    return "fill-cat-red stroke-paper-card dark:fill-cat-red-dark dark:stroke-paper-card-dark";
   }
   if (isFilled) {
-    // Dark mode matches CountryMaxxing's red accent — vivid against navy.
-    // Light mode uses a medium sky blue instead of red or full ink: enough
-    // contrast against the pale-blue background to read clearly without
-    // going as heavy/dark as the ink text color. WorldMap is only used by
-    // this one game today, so this stays a direct value rather than a prop
-    // no other caller exists to pass yet.
+    // Blue in both themes — "done," not tied to either theme's accent
+    // color, so it can't collide with red's "needs another look" meaning.
     // Faded relative to the current-question yellow — "done" should read as
     // settled/lower-priority next to whatever's still being asked about.
-    return "fill-cat-blue/65 stroke-paper-card dark:fill-cat-red-dark/65 dark:stroke-paper-card-dark";
+    return "fill-cat-blue/65 stroke-paper-card dark:fill-cat-blue-dark/65 dark:stroke-paper-card-dark";
   }
   return inScope
     ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
