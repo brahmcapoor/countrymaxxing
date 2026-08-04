@@ -178,12 +178,12 @@ export function MapIdentifyPlay({
     setShowSkipped(false);
   }
 
+  // Reveals this question's answer and counts it as a miss, then continues
+  // the round via the same path a real wrong guess takes — Skip is for "I
+  // think I can get this later," Give Up is for "just show me."
   function giveUp() {
-    const remaining =
-      sessionType === "learn"
-        ? queue.map((c) => ({ cca3: c.cca3, region: c.region, label: c.name, flag: c.flag }))
-        : undefined;
-    onExit({ ...score, remaining });
+    if (!current || feedback !== "idle") return;
+    submitAnswer("", "");
   }
 
   function handleSubmit(e: FormEvent) {
@@ -313,8 +313,8 @@ export function MapIdentifyPlay({
                 type="button"
                 onClick={giveUp}
                 disabled={feedback !== "idle"}
-                title="Give up"
-                aria-label="Give up"
+                title="Give up on this one"
+                aria-label="Give up on this one"
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-cat-red shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 dark:bg-paper-card-dark/95 dark:text-cat-red-dark ${
                   feedback === "idle" ? "opacity-100" : "pointer-events-none spin-slow opacity-40"
                 }`}
@@ -334,6 +334,9 @@ export function MapIdentifyPlay({
                     }}
                     readOnly={feedback !== "idle"}
                     placeholder="Which country is highlighted?"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${askCapital ? "pr-5" : "pr-14"} ${
                       feedback === "answered" && result
                         ? result.countryCorrect
@@ -363,6 +366,9 @@ export function MapIdentifyPlay({
                       }}
                       readOnly={feedback !== "idle"}
                       placeholder="And its capital?"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
                       className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
                         feedback === "answered" && result
                           ? result.capitalCorrect
