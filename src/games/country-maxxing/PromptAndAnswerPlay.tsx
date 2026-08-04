@@ -10,7 +10,14 @@ import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
 import { recordAttempt } from "../../core/stats";
-import { useCategoryTally, useSessionTally, type CategoryBreakdownEntry, type TalliedItem } from "../../core/sessionTally";
+import {
+  reviewList,
+  useCategoryTally,
+  useSessionTally,
+  type CategoryBreakdownEntry,
+  type TalliedItem,
+} from "../../core/sessionTally";
+import { ReviewItemsList } from "./ReviewDrawer";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   buildQueue,
@@ -56,6 +63,11 @@ export function PromptAndAnswerPlay({
   const [queue, setQueue] = useState<Question[]>(() => buildQueue(pool, directionSetting));
   const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
   const [showSkipped, setShowSkipped] = useState(false);
+  // Lets a Learn-mode session check what's been going wrong so far without
+  // waiting for the end-of-session summary — same bottom-panel slot and
+  // top-bar toggle pattern as "Skipped," and mutually exclusive with it
+  // (see the two onClick handlers below).
+  const [showReview, setShowReview] = useState(false);
   const [input, setInput] = useState("");
   const [feedback, setFeedback] = useState<"idle" | "correct" | "incorrect">("idle");
   const [score, setScore] = useState({ correct: 0, total: 0 });
@@ -252,6 +264,7 @@ export function PromptAndAnswerPlay({
   if (!current) return null;
 
   const skippedPending = queue.filter((q) => skippedKeys.has(questionKey(q)));
+  const reviewItems = reviewList(sessionTally.getItems());
   const awaitingRetype = feedback === "incorrect" && !retyped;
   const canAdvance = feedback === "correct" || (feedback === "incorrect" && retyped);
 
@@ -299,10 +312,24 @@ export function PromptAndAnswerPlay({
           <SoundToggle />
           {skippedPending.length > 0 && (
             <button
-              onClick={() => setShowSkipped((s) => !s)}
+              onClick={() => {
+                setShowSkipped((s) => !s);
+                setShowReview(false);
+              }}
               className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
             >
               Skipped ({skippedPending.length})
+            </button>
+          )}
+          {reviewItems.length > 0 && (
+            <button
+              onClick={() => {
+                setShowReview((s) => !s);
+                setShowSkipped(false);
+              }}
+              className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+            >
+              Review ({reviewItems.length})
             </button>
           )}
           {combo >= 2 && (
@@ -336,6 +363,13 @@ export function PromptAndAnswerPlay({
                 </li>
               ))}
             </ul>
+          </div>
+        </div>
+      ) : showReview ? (
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
+          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
+            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
+            <ReviewItemsList items={reviewItems} />
           </div>
         </div>
       ) : (

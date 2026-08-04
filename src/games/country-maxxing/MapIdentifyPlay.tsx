@@ -9,7 +9,14 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
-import { useCategoryTally, useSessionTally, type CategoryBreakdownEntry, type TalliedItem } from "../../core/sessionTally";
+import {
+  reviewList,
+  useCategoryTally,
+  useSessionTally,
+  type CategoryBreakdownEntry,
+  type TalliedItem,
+} from "../../core/sessionTally";
+import { ReviewItemsList } from "./ReviewDrawer";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   buildMapIdentifyQueue,
@@ -56,6 +63,9 @@ export function MapIdentifyPlay({
   const [queue, setQueue] = useState<Country[]>(() => buildMapIdentifyQueue(pool));
   const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
   const [showSkipped, setShowSkipped] = useState(false);
+  // See PromptAndAnswerPlay.tsx's matching comment — mid-session review of
+  // what's gone wrong so far, mutually exclusive with the Skipped panel.
+  const [showReview, setShowReview] = useState(false);
   const [countryInput, setCountryInput] = useState("");
   const [capitalInput, setCapitalInput] = useState("");
   const [feedback, setFeedback] = useState<"idle" | "answered">("idle");
@@ -277,6 +287,7 @@ export function MapIdentifyPlay({
   if (!current) return null;
 
   const skippedPending = queue.filter((c) => skippedKeys.has(c.cca3));
+  const reviewItems = reviewList(sessionTally.getItems());
   const filledCcn3s = new Set([current.ccn3]);
 
   return (
@@ -304,10 +315,24 @@ export function MapIdentifyPlay({
           <SoundToggle />
           {skippedPending.length > 0 && (
             <button
-              onClick={() => setShowSkipped((s) => !s)}
+              onClick={() => {
+                setShowSkipped((s) => !s);
+                setShowReview(false);
+              }}
               className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
             >
               Skipped ({skippedPending.length})
+            </button>
+          )}
+          {reviewItems.length > 0 && (
+            <button
+              onClick={() => {
+                setShowReview((s) => !s);
+                setShowSkipped(false);
+              }}
+              className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+            >
+              Review ({reviewItems.length})
             </button>
           )}
           {combo >= 2 && (
@@ -341,6 +366,13 @@ export function MapIdentifyPlay({
                 </li>
               ))}
             </ul>
+          </div>
+        </div>
+      ) : showReview ? (
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
+          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
+            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
+            <ReviewItemsList items={reviewItems} />
           </div>
         </div>
       ) : (

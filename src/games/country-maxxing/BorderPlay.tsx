@@ -9,7 +9,14 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
-import { useCategoryTally, useSessionTally, type CategoryBreakdownEntry, type TalliedItem } from "../../core/sessionTally";
+import {
+  reviewList,
+  useCategoryTally,
+  useSessionTally,
+  type CategoryBreakdownEntry,
+  type TalliedItem,
+} from "../../core/sessionTally";
+import { ReviewItemsList } from "./ReviewDrawer";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   borderExpectedAnswer,
@@ -57,6 +64,9 @@ export function BorderPlay({
   const [queue, setQueue] = useState<BorderQuestion[]>(() => buildBorderQueue(pool, typeSetting));
   const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
   const [showSkipped, setShowSkipped] = useState(false);
+  // See PromptAndAnswerPlay.tsx's matching comment — mid-session review of
+  // what's gone wrong so far, mutually exclusive with the Skipped panel.
+  const [showReview, setShowReview] = useState(false);
   const [input, setInput] = useState("");
   const [feedback, setFeedback] = useState<"idle" | "correct" | "incorrect">("idle");
   const [score, setScore] = useState({ correct: 0, total: 0 });
@@ -340,6 +350,7 @@ export function BorderPlay({
   if (!current) return null;
 
   const skippedPending = queue.filter((q) => skippedKeys.has(borderQuestionKey(q)));
+  const reviewItems = reviewList(sessionTally.getItems());
 
   // "reverse-lookup" has the subject as the secret answer — spoiling it on
   // the map before answering would hand over the question outright. The
@@ -384,10 +395,24 @@ export function BorderPlay({
           <SoundToggle />
           {skippedPending.length > 0 && (
             <button
-              onClick={() => setShowSkipped((s) => !s)}
+              onClick={() => {
+                setShowSkipped((s) => !s);
+                setShowReview(false);
+              }}
               className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
             >
               Skipped ({skippedPending.length})
+            </button>
+          )}
+          {reviewItems.length > 0 && (
+            <button
+              onClick={() => {
+                setShowReview((s) => !s);
+                setShowSkipped(false);
+              }}
+              className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+            >
+              Review ({reviewItems.length})
             </button>
           )}
           {combo >= 2 && (
@@ -421,6 +446,13 @@ export function BorderPlay({
                 </li>
               ))}
             </ul>
+          </div>
+        </div>
+      ) : showReview ? (
+        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
+          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
+            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
+            <ReviewItemsList items={reviewItems} />
           </div>
         </div>
       ) : (
