@@ -69,3 +69,35 @@ export function reviewList(items: TalliedItem[]): TalliedItem[] {
 export function missCount(item: TalliedItem): number {
   return item.attempts.filter((a) => !a).length;
 }
+
+export interface CategoryBreakdownEntry {
+  category: string;
+  correct: number;
+  total: number;
+}
+
+// A second, orthogonal tally alongside useSessionTally — that one collapses
+// to "one thing per country" on purpose (see its own comment); this one is
+// for splitting a mode's own accuracy by sub-skill (One Stop's direction,
+// Map Identify's country-vs-capital, Frontiers' question type), which is a
+// question about attempts, not about countries, and a single country can
+// contribute to more than one category in the same session.
+export interface CategoryTally {
+  record(category: string, correct: boolean): void;
+  getBreakdown(): CategoryBreakdownEntry[];
+}
+
+export function useCategoryTally(): CategoryTally {
+  const countsRef = useRef(new Map<string, { correct: number; total: number }>());
+
+  function record(category: string, correct: boolean): void {
+    const existing = countsRef.current.get(category) ?? { correct: 0, total: 0 };
+    countsRef.current.set(category, { correct: existing.correct + (correct ? 1 : 0), total: existing.total + 1 });
+  }
+
+  function getBreakdown(): CategoryBreakdownEntry[] {
+    return Array.from(countsRef.current.entries()).map(([category, counts]) => ({ category, ...counts }));
+  }
+
+  return { record, getBreakdown };
+}

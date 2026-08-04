@@ -15,7 +15,7 @@ import { BorderPlay, type BorderResult } from "./BorderPlay";
 import { PassportPage } from "./PassportPage";
 import { ReviewDrawer } from "./ReviewDrawer";
 import { ReviewMap } from "./ReviewMap";
-import { reviewList, roundBreakdown, type TalliedItem } from "../../core/sessionTally";
+import { reviewList, roundBreakdown, type CategoryBreakdownEntry, type TalliedItem } from "../../core/sessionTally";
 import {
   borderEligiblePool,
   nameAllListLabel,
@@ -62,6 +62,20 @@ interface NameAllResult {
   found: Country[];
   missed: Country[];
 }
+
+// Display labels for each mode's own category-breakdown keys (see
+// CategoryBreakdownEntry) — Manifest has no entry since it doesn't produce
+// one (free recall doesn't fit the per-item-attempt model the others share).
+const CATEGORY_LABELS: Record<Format, Record<string, string>> = {
+  "prompt-answer": { "country-to-capital": "Country → Capital", "capital-to-country": "Capital → Country" },
+  "map-identify": { country: "Country ID", capital: "Capital recall" },
+  borders: {
+    "name-neighbors": "Name the neighbors",
+    "reverse-lookup": "Who borders these?",
+    "longest-shortest": "Longest / shortest",
+  },
+  "name-all": {},
+};
 
 // A small customs-declaration-style checkbox — used for every yes/no toggle
 // on the setup screen instead of a bare native checkbox.
@@ -122,6 +136,9 @@ export function CountryMaxxing() {
   // same per-item-attempt model) — feeds the round breakdown and review
   // drawer below the mastered/missed grid on the shared summary screen.
   const [sessionTally, setSessionTally] = useState<TalliedItem[]>([]);
+  // Set by whichever mode just finished (see CATEGORY_LABELS) — the format
+  // in state at render time tells the summary screen which label set to use.
+  const [categoryBreakdown, setCategoryBreakdown] = useState<CategoryBreakdownEntry[]>([]);
   const [celebrate, setCelebrate] = useState(false);
   const [bragLine, setBragLine] = useState<string | null>(null);
 
@@ -216,6 +233,7 @@ export function CountryMaxxing() {
     setNameAllResult(null);
     setRemainingOnGiveUp(null);
     setSessionTally([]);
+    setCategoryBreakdown([]);
     setPhase("play");
   }
 
@@ -238,6 +256,7 @@ export function CountryMaxxing() {
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
     setSessionTally(result.sessionTally);
+    setCategoryBreakdown(result.skillBreakdown);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -253,6 +272,7 @@ export function CountryMaxxing() {
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
     setSessionTally(result.sessionTally);
+    setCategoryBreakdown(result.directionBreakdown);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -268,6 +288,7 @@ export function CountryMaxxing() {
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
     setSessionTally(result.sessionTally);
+    setCategoryBreakdown(result.typeBreakdown);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -437,6 +458,13 @@ export function CountryMaxxing() {
         {showRounds && (
           <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">
             {rounds.map((r) => `Round ${r.round}: ${r.correct}/${r.total}`).join(" · ")}
+          </p>
+        )}
+        {categoryBreakdown.length > 1 && (
+          <p className="mt-1 text-xs text-ink-soft dark:text-ink-soft-dark">
+            {categoryBreakdown
+              .map((e) => `${CATEGORY_LABELS[format][e.category] ?? e.category}: ${e.correct}/${e.total}`)
+              .join(" · ")}
           </p>
         )}
         {sessionTally.length > 0 && <ReviewMap pool={pool} sessionTally={sessionTally} />}

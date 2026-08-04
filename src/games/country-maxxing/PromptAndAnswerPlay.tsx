@@ -10,7 +10,7 @@ import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
 import { recordAttempt } from "../../core/stats";
-import { useSessionTally, type TalliedItem } from "../../core/sessionTally";
+import { useCategoryTally, useSessionTally, type CategoryBreakdownEntry, type TalliedItem } from "../../core/sessionTally";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   buildQueue,
@@ -38,6 +38,8 @@ export interface PromptAndAnswerResult {
   /** Every attempt this session, per country — feeds the summary screen's
    * round breakdown, review drawer, and difficulty-tinted map. */
   sessionTally: TalliedItem[];
+  /** Accuracy split by direction (country → capital vs. capital → country). */
+  directionBreakdown: CategoryBreakdownEntry[];
 }
 
 export function PromptAndAnswerPlay({
@@ -71,6 +73,7 @@ export function PromptAndAnswerPlay({
   const [retyped, setRetyped] = useState(false);
   const { shaking, trigger: triggerShake } = useShake();
   const sessionTally = useSessionTally();
+  const directionTally = useCategoryTally();
   // Countries already answered correctly — kept highlighted (with a capital
   // dot) after moving on, instead of only ever showing the current one, so
   // the map reads as a running progress trail.
@@ -148,6 +151,7 @@ export function PromptAndAnswerPlay({
       correct,
       isGiveUp,
     );
+    directionTally.record(current.direction, correct);
     if (correct) {
       playCorrect();
       setCombo((c) => c + 1);
@@ -194,7 +198,8 @@ export function PromptAndAnswerPlay({
     setFeedback("idle");
     setGaveUp(false);
     setRetyped(false);
-    if (nextQueue.length === 0) onExit({ ...score, sessionTally: sessionTally.getItems() });
+    if (nextQueue.length === 0)
+      onExit({ ...score, sessionTally: sessionTally.getItems(), directionBreakdown: directionTally.getBreakdown() });
   }
 
   function skip() {
