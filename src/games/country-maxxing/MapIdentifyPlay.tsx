@@ -9,14 +9,7 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
-import { roastFor } from "../../data/roasts";
-import {
-  buildMapIdentifyQueue,
-  mapIdentifyMissCount,
-  recordMapIdentifyAttempt,
-  ROAST_MISS_THRESHOLD,
-  type SessionType,
-} from "./engine";
+import { buildMapIdentifyQueue, recordMapIdentifyAttempt, type SessionType } from "./engine";
 
 const ACCENT = "red"; // matches CountryMaxxing.tsx's accent
 
@@ -55,7 +48,9 @@ export function MapIdentifyPlay({
   const [result, setResult] = useState<Result | null>(null);
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [combo, setCombo] = useState(0);
-  const [roastMessage, setRoastMessage] = useState<string | null>(null);
+  // See PromptAndAnswerPlay.tsx's matching comment — distinguishes "you
+  // tried and missed" copy/shake from "you asked to be shown."
+  const [gaveUp, setGaveUp] = useState(false);
 
   // See PromptAndAnswerPlay.tsx's matching comment — same iOS Safari
   // keyboard-covers-input fix. Unlike the other modes, the map here is NOT
@@ -98,9 +93,9 @@ export function MapIdentifyPlay({
   }, [feedback, current?.cca3]);
 
   // A fully correct answer auto-advances after a beat; anything wrong waits
-  // for a manual Next so there's time to read the correction/roast. The
-  // effect's own cleanup (on feedback/cca3 change) cancels a pending timer —
-  // no manual clearing needed in advance()/skip()/jumpTo().
+  // for a manual Next so there's time to read the correction. The effect's
+  // own cleanup (on feedback/cca3 change) cancels a pending timer — no
+  // manual clearing needed in advance()/skip()/jumpTo().
   useEffect(() => {
     if (feedback !== "answered" || !result?.countryCorrect || !(result.capitalCorrect || !askCapital)) return;
     const timeout = setTimeout(() => advanceRef.current(), 800);
@@ -128,12 +123,9 @@ export function MapIdentifyPlay({
     if (fullyCorrect) {
       playCorrect();
       setCombo((c) => c + 1);
-      setRoastMessage(null);
     } else {
       playIncorrect();
       setCombo(0);
-      const misses = mapIdentifyMissCount(current);
-      setRoastMessage(misses >= ROAST_MISS_THRESHOLD ? roastFor(current.name) : null);
     }
     setResult({ countryCorrect, capitalCorrect });
     setScore((s) => ({ correct: s.correct + (fullyCorrect ? 1 : 0), total: s.total + 1 }));
@@ -156,7 +148,7 @@ export function MapIdentifyPlay({
     setCapitalInput("");
     setResult(null);
     setFeedback("idle");
-    setRoastMessage(null);
+    setGaveUp(false);
     if (nextQueue.length === 0) onExit(score);
   }
 
@@ -183,6 +175,7 @@ export function MapIdentifyPlay({
   // think I can get this later," Give Up is for "just show me."
   function giveUp() {
     if (!current || feedback !== "idle") return;
+    setGaveUp(true);
     submitAnswer("", "");
   }
 
@@ -281,9 +274,6 @@ export function MapIdentifyPlay({
             <div className="relative flex items-center gap-2">
               {feedback === "answered" && result && (
                 <div className="pointer-events-none absolute inset-x-0 bottom-full z-10 mb-2 space-y-1 rounded-md bg-paper-card/95 p-2 text-center text-sm shadow-sm backdrop-blur dark:bg-paper-card-dark/95">
-                  {roastMessage && (
-                    <p className="text-xs italic text-ink-soft dark:text-ink-soft-dark">{roastMessage}</p>
-                  )}
                   <p
                     className={
                       result.countryCorrect
@@ -293,7 +283,9 @@ export function MapIdentifyPlay({
                   >
                     {result.countryCorrect
                       ? `Correct! ${current.flag}`
-                      : `Not quite — it's ${current.name}. ${current.flag}`}
+                      : gaveUp
+                        ? `It's ${current.name}. ${current.flag}`
+                        : `Not quite — it's ${current.name}. ${current.flag}`}
                   </p>
                   {askCapital && (
                     <p
@@ -341,7 +333,7 @@ export function MapIdentifyPlay({
                       feedback === "answered" && result
                         ? result.countryCorrect
                           ? "border-cat-green dark:border-cat-green-dark"
-                          : "border-border shake-subtle dark:border-border-dark"
+                          : `border-border dark:border-border-dark ${gaveUp ? "" : "shake-subtle"}`
                         : "border-border dark:border-border-dark"
                     }`}
                   />
@@ -373,7 +365,7 @@ export function MapIdentifyPlay({
                         feedback === "answered" && result
                           ? result.capitalCorrect
                             ? "border-cat-green dark:border-cat-green-dark"
-                            : "border-border shake-subtle dark:border-border-dark"
+                            : `border-border dark:border-border-dark ${gaveUp ? "" : "shake-subtle"}`
                           : "border-border dark:border-border-dark"
                       }`}
                     />

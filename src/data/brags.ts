@@ -1,5 +1,7 @@
 // Shown only on a genuine celebration (session mastered / perfect quiz /
-// named them all) — the companion pool to roasts.ts's repeat-miss ribbing.
+// named them all) — the app's only source of "personality" copy on a miss/
+// win now that repeat-miss roasting was removed in favor of celebrating
+// progress instead of ribbing mistakes.
 const BRAG_LINES = [
   "Local guide status: unlocked.",
   "Customs waved you through without a second look.",

@@ -49,9 +49,10 @@ src/
 - `combo.ts`, `useCountdown.ts` — small reusable game-mechanic helpers
 
 **`src/data/`** — `countries.ts` (197-country dataset), `capitalCoordinates.ts`,
-`mapCoverage.ts` (countries the map can't render well), `roasts.ts`,
-`loadingMessages.ts`, `funFacts.ts`, `borderLengths.ts` (bilateral land-border
-lengths, keyed by cca3 pair — see "Border mode" below)
+`mapCoverage.ts` (countries the map can't render well), `brags.ts` (celebration
+copy on a win — see below; no equivalent miss-side copy on purpose),
+`loadingMessages.ts`, `funFacts.ts`, `taglines.ts`, `borderLengths.ts`
+(bilateral land-border lengths, keyed by cca3 pair — see "Border mode" below)
 
 **`src/components/`** — `WorldMap.tsx` (the big reusable d3-geo map — see
 below), `SoundToggle.tsx`, `Confetti.tsx`, `ListingCard.tsx` (shelf card),
@@ -175,8 +176,8 @@ technically wrong answer, distinct from genuine dual-capital cases.
 ## Play-screen answer panel pattern
 
 **Standing rule, all three modes: the answer input's on-screen position must
-never move.** Nothing — a hint, a correction, a roast, a "next" affordance —
-is allowed to appear or disappear in a way that shifts it, even by a pixel.
+never move.** Nothing — a hint, a correction, a "next" affordance — is
+allowed to appear or disappear in a way that shifts it, even by a pixel.
 This has been raised as a recurring bug (Manifest's "Already got X" hint was
 the last offender, appearing *below* the input); treat any new element near
 the input with this rule by default, not as an afterthought to fix once
@@ -194,8 +195,8 @@ Two techniques enforce the rule, pick whichever fits:
   question card (boarding-pass shaped: a dashed-divider stub on the left
   holding the flag — or a plane glyph `✈` when revealing it would spoil a
   capital→country answer — with the prompt text to its right) swaps its own
-  content to show the correction/roast on a wrong answer, rather than a
-  second element appearing above/below it. Same box, different content, so
+  content to show the correction on a wrong answer, rather than a second
+  element appearing above/below it. Same box, different content, so
   its height changing doesn't introduce a *new* sibling to shift around.
 - **Absolutely-position anything that can't reuse a slot.** Manifest's
   "Already got X" / "not finding that one" hint, and each mode's Next-style

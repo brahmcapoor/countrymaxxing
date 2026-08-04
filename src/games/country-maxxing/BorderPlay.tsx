@@ -9,16 +9,13 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
-import { roastFor } from "../../data/roasts";
 import {
   borderExpectedAnswer,
   borderMatchCandidates,
   borderPromptFor,
   borderQuestionKey,
-  borderQuestionMissCount,
   buildBorderQueue,
   recordBorderAttempt,
-  ROAST_MISS_THRESHOLD,
   type BorderQuestion,
   type BorderQuestionTypeSetting,
   type SessionType,
@@ -55,7 +52,13 @@ export function BorderPlay({
   const [feedback, setFeedback] = useState<"idle" | "correct" | "incorrect">("idle");
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [combo, setCombo] = useState(0);
-  const [roastMessage, setRoastMessage] = useState<string | null>(null);
+  // See PromptAndAnswerPlay.tsx's matching comment — distinguishes "you
+  // tried and missed" copy/shake from "you asked to be shown" for the
+  // reverse-lookup/longest-shortest give-up path (giveUpOnQuestion). Not
+  // needed for name-neighbors — its own feedback text (giveUpOnCurrent) is
+  // already give-up-only phrasing ("Missed X, Y" / "Got them all"), never
+  // shown for a genuine wrong guess.
+  const [gaveUp, setGaveUp] = useState(false);
   // Countries whose question has been fully answered correctly / answered
   // wrong (or given up on) — same "current vs wrong vs done" map convention
   // as the other modes, keyed to the question's *subject* country.
@@ -125,12 +128,9 @@ export function BorderPlay({
     if (correct) {
       playCorrect();
       setCombo((c) => c + 1);
-      setRoastMessage(null);
     } else {
       playIncorrect();
       setCombo(0);
-      const misses = borderQuestionMissCount(current);
-      setRoastMessage(misses >= ROAST_MISS_THRESHOLD ? roastFor(current.country.name) : null);
     }
     setFeedback(correct ? "correct" : "incorrect");
     setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
@@ -213,8 +213,8 @@ export function BorderPlay({
     setQueue(nextQueue);
     setInput("");
     setFeedback("idle");
-    setRoastMessage(null);
     setHint(null);
+    setGaveUp(false);
     if (nextQueue.length === 0) onExit(score);
   }
 
@@ -225,8 +225,6 @@ export function BorderPlay({
     if (!current || !isNameNeighbors) return;
     if (foundNeighborCca3s.size < current.neighbors.length) {
       recordBorderAttempt(current, false);
-      const misses = borderQuestionMissCount(current);
-      setRoastMessage(misses >= ROAST_MISS_THRESHOLD ? roastFor(current.country.name) : null);
     }
     setFeedback("incorrect");
   }
@@ -247,6 +245,7 @@ export function BorderPlay({
   // answer path, then continues the round rather than ending it.
   function giveUpOnQuestion() {
     if (!current || isNameNeighbors || feedback !== "idle") return;
+    setGaveUp(true);
     submitAnswer("");
   }
 
@@ -372,9 +371,6 @@ export function BorderPlay({
               <div className="flex flex-1 items-center justify-center px-4 py-3 text-center">
                 {feedback === "incorrect" ? (
                   <div className="space-y-1">
-                    {roastMessage && (
-                      <p className="text-xs italic text-ink-soft dark:text-ink-soft-dark">{roastMessage}</p>
-                    )}
                     {isNameNeighbors ? (
                       <p className="font-serif text-lg text-cat-red dark:text-cat-red-dark">
                         {current.neighbors.length - foundNeighborCca3s.size === 0
@@ -386,7 +382,9 @@ export function BorderPlay({
                       </p>
                     ) : (
                       <p className="font-serif text-xl text-cat-red dark:text-cat-red-dark">
-                        Not quite — it's {borderExpectedAnswer(current)}.
+                        {gaveUp
+                          ? `It's ${borderExpectedAnswer(current)}.`
+                          : `Not quite — it's ${borderExpectedAnswer(current)}.`}
                       </p>
                     )}
                   </div>
@@ -440,7 +438,7 @@ export function BorderPlay({
                   spellCheck={false}
                   className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
                     feedback === "correct" ? "border-cat-green dark:border-cat-green-dark" : "border-border dark:border-border-dark"
-                  } ${feedback === "incorrect" || hint?.kind === "wrong" || hint?.kind === "unknown" ? "shake-subtle" : ""}`}
+                  } ${(feedback === "incorrect" && !gaveUp) || hint?.kind === "wrong" || hint?.kind === "unknown" ? "shake-subtle" : ""}`}
                 />
                 {feedback === "idle" && (
                   <button

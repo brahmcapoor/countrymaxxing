@@ -10,7 +10,6 @@ import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { recordAttempt } from "../../core/stats";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
-import { roastFor } from "../../data/roasts";
 import {
   buildQueue,
   expectedAnswer,
@@ -18,8 +17,6 @@ import {
   NAMESPACE,
   promptFor,
   questionKey,
-  questionMissCount,
-  ROAST_MISS_THRESHOLD,
   type DirectionSetting,
   type Question,
   type SessionType,
@@ -55,7 +52,11 @@ export function PromptAndAnswerPlay({
   const [feedback, setFeedback] = useState<"idle" | "correct" | "incorrect">("idle");
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [combo, setCombo] = useState(0);
-  const [roastMessage, setRoastMessage] = useState<string | null>(null);
+  // Give Up reuses the wrong-answer path (submitAnswer("")) so it counts as
+  // a miss and requeues the same way — this just distinguishes "you tried
+  // and missed" copy/shake from "you asked to be shown," which read oddly
+  // reusing the same "Not quite" wrong-answer framing.
+  const [gaveUp, setGaveUp] = useState(false);
   // Countries already answered correctly — kept highlighted (with a capital
   // dot) after moving on, instead of only ever showing the current one, so
   // the map reads as a running progress trail.
@@ -105,9 +106,9 @@ export function PromptAndAnswerPlay({
   }, [feedback, currentKey]);
 
   // A correct answer auto-advances after a beat; an incorrect one waits for
-  // a manual Next so there's time to read the correction (and any roast).
-  // The effect's own cleanup (on feedback/currentKey change) cancels it —
-  // no manual clearing needed in advance()/skip()/jumpTo().
+  // a manual Next so there's time to read the correction. The effect's own
+  // cleanup (on feedback/currentKey change) cancels it — no manual clearing
+  // needed in advance()/skip()/jumpTo().
   useEffect(() => {
     if (feedback !== "correct") return;
     const timeout = setTimeout(() => advanceRef.current(), 800);
@@ -116,7 +117,7 @@ export function PromptAndAnswerPlay({
 
   // The wrong guess shakes itself out rather than sitting there readOnly —
   // cleared once the shake animation (0.35s) finishes, so the box reads
-  // as reset while the correction/roast above it stays up for Next.
+  // as reset while the correction above it stays up for Next.
   useEffect(() => {
     if (feedback !== "incorrect") return;
     const timeout = setTimeout(() => setInput(""), 350);
@@ -130,12 +131,9 @@ export function PromptAndAnswerPlay({
     if (correct) {
       playCorrect();
       setCombo((c) => c + 1);
-      setRoastMessage(null);
     } else {
       playIncorrect();
       setCombo(0);
-      const misses = questionMissCount(current);
-      setRoastMessage(misses >= ROAST_MISS_THRESHOLD ? roastFor(current.country.name) : null);
     }
     setFeedback(correct ? "correct" : "incorrect");
     setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
@@ -169,7 +167,7 @@ export function PromptAndAnswerPlay({
     setQueue(nextQueue);
     setInput("");
     setFeedback("idle");
-    setRoastMessage(null);
+    setGaveUp(false);
     if (nextQueue.length === 0) onExit(score);
   }
 
@@ -188,6 +186,7 @@ export function PromptAndAnswerPlay({
   // think I can get this later," Give Up is for "just show me."
   function giveUp() {
     if (!current || feedback !== "idle") return;
+    setGaveUp(true);
     submitAnswer("");
   }
 
@@ -308,14 +307,9 @@ export function PromptAndAnswerPlay({
               </div>
               <div className="flex flex-1 items-center justify-center px-4 py-3 text-center">
                 {feedback === "incorrect" ? (
-                  <div className="space-y-1">
-                    {roastMessage && (
-                      <p className="text-xs italic text-ink-soft dark:text-ink-soft-dark">{roastMessage}</p>
-                    )}
-                    <p className="font-serif text-xl text-cat-red dark:text-cat-red-dark">
-                      Not quite — it's {expectedAnswer(current)}.
-                    </p>
-                  </div>
+                  <p className="font-serif text-xl text-cat-red dark:text-cat-red-dark">
+                    {gaveUp ? `It's ${expectedAnswer(current)}.` : `Not quite — it's ${expectedAnswer(current)}.`}
+                  </p>
                 ) : (
                   <p className="font-serif text-xl text-ink dark:text-ink-dark">{promptFor(current)}</p>
                 )}
@@ -348,7 +342,7 @@ export function PromptAndAnswerPlay({
                   spellCheck={false}
                   className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
                     feedback === "correct" ? "border-cat-green dark:border-cat-green-dark" : "border-border dark:border-border-dark"
-                  } ${feedback === "incorrect" ? "shake-subtle" : ""}`}
+                  } ${feedback === "incorrect" && !gaveUp ? "shake-subtle" : ""}`}
                 />
                 {feedback === "idle" && (
                   <button

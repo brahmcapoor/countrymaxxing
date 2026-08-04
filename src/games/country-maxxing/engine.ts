@@ -10,9 +10,6 @@ export type NameAllSubject = "countries" | "capitals";
 export const NAMESPACE = "country-maxxing";
 const MISTAKE_MIN_ATTEMPTS = 2;
 const MISTAKE_MAX_ACCURACY = 0.7;
-// A repeat-miss "roast" only shows once a specific item has actually proven
-// itself to be a recurring blind spot, not on a first or second slip.
-export const ROAST_MISS_THRESHOLD = 3;
 
 export interface Question {
   country: Country;
@@ -95,10 +92,6 @@ export function expectedAnswer(question: Question): string {
   return question.direction === "country-to-capital" ? question.country.capital : question.country.name;
 }
 
-export function questionMissCount(question: Question): number {
-  return getStat(NAMESPACE, questionKey(question))?.misses ?? 0;
-}
-
 // A handful of countries (e.g. South Africa) officially list more than one
 // capital — any of them counts as correct, even though prompts and lists
 // only ever show the primary one.
@@ -137,10 +130,6 @@ const MAP_IDENTIFY_CAPITAL_TAG = "map-identify-capital";
 export function isWeakMapIdentify(country: Country, askCapital: boolean): boolean {
   if (isWeak(country, MAP_IDENTIFY_TAG)) return true;
   return askCapital && isWeak(country, MAP_IDENTIFY_CAPITAL_TAG);
-}
-
-export function mapIdentifyMissCount(country: Country): number {
-  return getStat(NAMESPACE, statTag(country, MAP_IDENTIFY_TAG))?.misses ?? 0;
 }
 
 export function weakPoolForMapIdentify(pool: Country[], askCapital: boolean): Country[] {
@@ -330,10 +319,6 @@ export function borderMatchCandidates(question: BorderQuestion): string[] {
 export function borderExpectedAnswer(question: BorderQuestion): string {
   if (question.type === "reverse-lookup") return question.country.name;
   return longestShortestNeighbor(question)?.name ?? "";
-}
-
-export function borderQuestionMissCount(question: BorderQuestion): number {
-  return getStat(NAMESPACE, borderQuestionKey(question))?.misses ?? 0;
 }
 
 export function recordBorderAttempt(question: BorderQuestion, correct: boolean): void {
