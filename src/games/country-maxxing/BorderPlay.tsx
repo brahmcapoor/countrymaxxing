@@ -242,17 +242,12 @@ export function BorderPlay({
     setHint(null);
   }
 
-  function giveUpSession() {
-    const remaining =
-      sessionType === "learn"
-        ? queue.map((q) => ({
-            cca3: q.country.cca3,
-            region: q.country.region,
-            label: borderExpectedAnswer(q) || q.country.name,
-            flag: q.country.flag,
-          }))
-        : undefined;
-    onExit({ ...score, remaining });
+  // Same idea as name-neighbors' giveUpOnCurrent, for the other two question
+  // types: reveals the answer and counts it as a miss via the normal wrong-
+  // answer path, then continues the round rather than ending it.
+  function giveUpOnQuestion() {
+    if (!current || isNameNeighbors || feedback !== "idle") return;
+    submitAnswer("");
   }
 
   function jumpTo(target: BorderQuestion) {
@@ -422,10 +417,10 @@ export function BorderPlay({
             <div className="relative flex items-center gap-2">
               <button
                 type="button"
-                onClick={isNameNeighbors ? giveUpOnCurrent : giveUpSession}
+                onClick={isNameNeighbors ? giveUpOnCurrent : giveUpOnQuestion}
                 disabled={feedback !== "idle"}
-                title={isNameNeighbors ? "Give up on this one" : "Give up"}
-                aria-label={isNameNeighbors ? "Give up on this one" : "Give up"}
+                title="Give up on this one"
+                aria-label="Give up on this one"
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-cat-red shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 dark:bg-paper-card-dark/95 dark:text-cat-red-dark ${
                   feedback === "idle" ? "opacity-100" : "pointer-events-none spin-slow opacity-40"
                 }`}
