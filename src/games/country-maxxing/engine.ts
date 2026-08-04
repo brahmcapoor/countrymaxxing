@@ -11,6 +11,19 @@ export const NAMESPACE = "country-maxxing";
 const MISTAKE_MIN_ATTEMPTS = 2;
 const MISTAKE_MAX_ACCURACY = 0.7;
 
+// A missed item in Learn mode comes back after a short, bounded gap instead
+// of at the very end of a potentially-huge queue — testing it again while
+// the miss is still fresh actually reinforces it; with 54 African countries
+// loaded, a miss requeued to the very back could resurface 50 questions
+// later, well past the point where the first exposure could help. Shared
+// across all four play screens' requeue-on-miss logic.
+const REQUEUE_GAP = 6;
+
+export function requeueAfterMiss<T>(rest: T[], item: T): T[] {
+  const at = Math.min(REQUEUE_GAP, rest.length);
+  return [...rest.slice(0, at), item, ...rest.slice(at)];
+}
+
 export interface Question {
   country: Country;
   direction: Direction;
@@ -25,8 +38,8 @@ export function questionKey(question: Question): string {
 }
 
 // Name All is free recall (no per-item prompt), a different skill from Prompt
-// & Answer's cued recall — tracked under its own tag so "focus on mistakes"
-// doesn't conflate the two.
+// & Answer's cued recall — tracked under its own tag so "focus on weak
+// spots" doesn't conflate the two.
 function nameAllTag(subject: NameAllSubject): string {
   return `name-all-${subject}`;
 }
@@ -36,11 +49,14 @@ function pickDirection(setting: DirectionSetting): Direction {
   return Math.random() < 0.5 ? "country-to-capital" : "capital-to-country";
 }
 
+// Recency-weighted, not lifetime — see emaMiss in stats.ts. A country that
+// was missed a lot months ago but has been answered correctly the last few
+// times drops out of "weak" quickly, rather than needing to out-earn a
+// whole history of old misses one correct answer at a time.
 function isWeak(country: Country, tag: string): boolean {
   const stat = getStat(NAMESPACE, statTag(country, tag));
   if (!stat || stat.attempts < MISTAKE_MIN_ATTEMPTS) return false;
-  const accuracy = (stat.attempts - stat.misses) / stat.attempts;
-  return accuracy < MISTAKE_MAX_ACCURACY;
+  return stat.emaMiss > 1 - MISTAKE_MAX_ACCURACY;
 }
 
 export function isWeakItem(country: Country, direction: Direction): boolean {
@@ -92,17 +108,31 @@ export function expectedAnswer(question: Question): string {
   return question.direction === "country-to-capital" ? question.country.capital : question.country.name;
 }
 
+// A capital literally named "<Place> City" or "City of <Place>" (Kuwait
+// City, Mexico City, Guatemala City, Panama City, Vatican City, City of San
+// Marino) reads naturally as just "<Place>" too — accept both forms rather
+// than only the official full one.
+export function capitalMatchCandidates(country: Country): string[] {
+  return country.capitals.flatMap((capital) => {
+    const cityOf = /^City of (.+)$/i.exec(capital);
+    if (cityOf) return [capital, cityOf[1]!];
+    const trailingCity = /^(.+) City$/i.exec(capital);
+    if (trailingCity) return [capital, trailingCity[1]!];
+    return [capital];
+  });
+}
+
 // A handful of countries (e.g. South Africa) officially list more than one
 // capital — any of them counts as correct, even though prompts and lists
 // only ever show the primary one.
 export function matchCandidates(question: Question): string[] {
   return question.direction === "country-to-capital"
-    ? question.country.capitals
+    ? capitalMatchCandidates(question.country)
     : [question.country.name, ...question.country.altNames];
 }
 
 export function nameAllCandidates(country: Country, subject: NameAllSubject): string[] {
-  return subject === "countries" ? [country.name, ...country.altNames] : country.capitals;
+  return subject === "countries" ? [country.name, ...country.altNames] : capitalMatchCandidates(country);
 }
 
 export function nameAllLabel(country: Country, subject: NameAllSubject): string {
@@ -122,7 +152,7 @@ function recordAttemptFor(country: Country, tag: string, correct: boolean): void
 
 // Map Identify: recognizing a highlighted shape, and (optionally) recalling
 // its capital, are different skills — tracked under separate tags so
-// "focus on mistakes" can tell "can't recognize the shape" apart from
+// "focus on weak spots" can tell "can't recognize the shape" apart from
 // "recognizes it but doesn't know the capital."
 const MAP_IDENTIFY_TAG = "map-identify";
 const MAP_IDENTIFY_CAPITAL_TAG = "map-identify-capital";

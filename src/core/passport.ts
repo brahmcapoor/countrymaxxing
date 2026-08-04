@@ -3,7 +3,7 @@
 // score) — a lightweight, separate achievement layer on top of the
 // per-country stats in stats.ts, not derived from it. Kept intentionally
 // coarse: one stamp per region, not per game mode, so it stays an
-// achievable trophy case rather than a second mistake tracker.
+// achievable trophy case rather than a second weak-spot tracker.
 const STORAGE_KEY = "countrymaxxing:passport:v1";
 
 type PassportStore = Record<string, number>; // region -> first-stamped timestamp (ms)

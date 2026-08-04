@@ -103,7 +103,7 @@ export function CountryMaxxing() {
   const [borderTypeSetting, setBorderTypeSetting] = useState<BorderQuestionTypeSetting>("mixed");
   const [borderShowMap, setBorderShowMap] = useState(true);
   const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set(regions));
-  const [focusOnMistakes, setFocusOnMistakes] = useState(false);
+  const [focusOnWeakSpots, setFocusOnWeakSpots] = useState(false);
   const [speedRoundEnabled, setSpeedRoundEnabled] = useState(false);
   const [speedRoundSeconds, setSpeedRoundSeconds] = useState<number>(600);
 
@@ -131,10 +131,10 @@ export function CountryMaxxing() {
           : weakPoolForNameAll(regionPool, subject);
   // Name All is free recall — there's no per-item prompt to have gotten
   // "wrong," so a session-completion miss isn't the same signal "focus on
-  // mistakes" means for the other two modes. Don't apply it here, even if
+  // weak spots" means for the other two modes. Don't apply it here, even if
   // the checkbox was left checked from a different format.
   const pool =
-    focusOnMistakes && format !== "name-all"
+    focusOnWeakSpots && format !== "name-all"
       ? weakPool
       : format === "borders"
         ? // Border mode silently skips countries the current type setting
@@ -830,12 +830,16 @@ export function CountryMaxxing() {
 
       {format !== "name-all" && (
         <div className="mt-8">
-          <DeclareCheckbox checked={focusOnMistakes} onChange={setFocusOnMistakes}>
-            Focus on mistakes{" "}
+          <DeclareCheckbox checked={focusOnWeakSpots} onChange={setFocusOnWeakSpots}>
+            Focus on weak spots{" "}
             <span className="text-ink-soft dark:text-ink-soft-dark">
               ({weakPool.length} weak spot{weakPool.length === 1 ? "" : "s"} in this selection)
             </span>
           </DeclareCheckbox>
+          <p className="mt-1.5 pl-8 text-xs text-ink-soft dark:text-ink-soft-dark">
+            A weak spot needs a few attempts and recent accuracy under 70% — your last few tries count
+            for more than old ones, so a rough patch you've since gotten past clears out on its own.
+          </p>
         </div>
       )}
 

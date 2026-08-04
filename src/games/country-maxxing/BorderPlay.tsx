@@ -8,6 +8,7 @@ import { accentSolidClass } from "../../core/palette";
 import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
+import { useShake } from "../../core/useShake";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   borderExpectedAnswer,
@@ -16,6 +17,7 @@ import {
   borderQuestionKey,
   buildBorderQueue,
   recordBorderAttempt,
+  requeueAfterMiss,
   type BorderQuestion,
   type BorderQuestionTypeSetting,
   type SessionType,
@@ -59,6 +61,12 @@ export function BorderPlay({
   // already give-up-only phrasing ("Missed X, Y" / "Got them all"), never
   // shown for a genuine wrong guess.
   const [gaveUp, setGaveUp] = useState(false);
+  // reverse-lookup/longest-shortest only — same forced-retype-to-advance
+  // gate as the other two modes (see PromptAndAnswerPlay.tsx). Name-neighbors
+  // doesn't need its own flag: it reuses foundNeighborCca3s itself as the
+  // "has everything been retyped back" signal (see canAdvance below).
+  const [retyped, setRetyped] = useState(false);
+  const { shaking, trigger: triggerShake } = useShake();
   // Countries whose question has been fully answered correctly / answered
   // wrong (or given up on) — same "current vs wrong vs done" map convention
   // as the other modes, keyed to the question's *subject* country.
@@ -97,23 +105,34 @@ export function BorderPlay({
   const isNameNeighbors = current?.type === "name-neighbors";
   advanceRef.current = advance;
 
+  // A miss only clears once it's been typed back correctly — same retention
+  // mechanic as the other two modes (see PromptAndAnswerPlay.tsx). For
+  // name-neighbors there's no separate "retype" flag: giving up leaves
+  // foundNeighborCca3s short of the full set, and submitNeighbor keeps
+  // accepting input (without re-triggering the "correct" branch — see
+  // below) until every missed neighbor has been typed back in.
+  const neighborsComplete = current ? foundNeighborCca3s.size === current.neighbors.length : false;
+  const canAdvance = isNameNeighbors
+    ? feedback === "correct" || (feedback === "incorrect" && neighborsComplete)
+    : feedback === "correct" || (feedback === "incorrect" && retyped);
+
   useEffect(() => {
     setFoundNeighborCca3s(new Set());
   }, [currentKey]);
 
   useEffect(() => {
-    if (feedback === "idle") inputRef.current?.focus();
+    if (feedback === "idle" || (feedback === "incorrect" && !canAdvance)) inputRef.current?.focus();
     else nextButtonRef.current?.focus();
-  }, [feedback, currentKey]);
+  }, [feedback, currentKey, canAdvance]);
 
-  // A correct answer auto-advances after a beat; an incorrect one waits for
-  // a manual Next. Same reasoning as the other modes: see the "Play-screen
-  // answer panel pattern" note in CLAUDE.md.
+  // A correct answer (or a fully retyped miss) auto-advances after a beat;
+  // an unretyped miss waits indefinitely. Same reasoning as the other
+  // modes: see the "Play-screen answer panel pattern" note in CLAUDE.md.
   useEffect(() => {
-    if (feedback !== "correct") return;
+    if (!canAdvance) return;
     const timeout = setTimeout(() => advanceRef.current(), 800);
     return () => clearTimeout(timeout);
-  }, [feedback, currentKey]);
+  }, [canAdvance, currentKey]);
 
   useEffect(() => {
     if (feedback !== "incorrect") return;
@@ -121,7 +140,7 @@ export function BorderPlay({
     return () => clearTimeout(timeout);
   }, [feedback, currentKey]);
 
-  function submitAnswer(answer: string) {
+  function submitAnswer(answer: string, isGiveUp = false) {
     if (!current) return;
     const correct = isCloseMatch(answer, borderMatchCandidates(current));
     recordBorderAttempt(current, correct);
@@ -131,7 +150,10 @@ export function BorderPlay({
     } else {
       playIncorrect();
       setCombo(0);
+      if (!isGiveUp) triggerShake();
     }
+    setGaveUp(isGiveUp);
+    setRetyped(false);
     setFeedback(correct ? "correct" : "incorrect");
     setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
   }
@@ -177,7 +199,11 @@ export function BorderPlay({
     setInput("");
     const nextFound = new Set(foundNeighborCca3s).add(match.cca3);
     setFoundNeighborCca3s(nextFound);
-    if (nextFound.size === current.neighbors.length) {
+    // Only a genuine live completion (not a post-give-up retype catching the
+    // set up) counts as a correct attempt/score bump — retyping back the
+    // ones you already missed shouldn't retroactively turn the miss into a
+    // win, just unlock the advance.
+    if (feedback === "idle" && nextFound.size === current.neighbors.length) {
       recordBorderAttempt(current, true);
       setCombo((c) => c + 1);
       setScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
@@ -191,7 +217,7 @@ export function BorderPlay({
     const wasIncorrect = feedback === "incorrect";
     const requeue = sessionType === "learn" && wasIncorrect;
     const rest = queue.slice(1);
-    const nextQueue = requeue ? [...rest, current] : rest;
+    const nextQueue = requeue ? requeueAfterMiss(rest, current) : rest;
     const ccn3 = current.country.ccn3;
 
     setSkippedKeys((prev) => {
@@ -215,6 +241,7 @@ export function BorderPlay({
     setFeedback("idle");
     setHint(null);
     setGaveUp(false);
+    setRetyped(false);
     if (nextQueue.length === 0) onExit(score);
   }
 
@@ -245,8 +272,7 @@ export function BorderPlay({
   // answer path, then continues the round rather than ending it.
   function giveUpOnQuestion() {
     if (!current || isNameNeighbors || feedback !== "idle") return;
-    setGaveUp(true);
-    submitAnswer("");
+    submitAnswer("", true);
   }
 
   function jumpTo(target: BorderQuestion) {
@@ -260,16 +286,28 @@ export function BorderPlay({
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (isNameNeighbors) {
-      if (feedback === "idle") submitNeighbor(input);
-      else advance();
+      if (feedback === "idle" || (feedback === "incorrect" && !neighborsComplete)) {
+        submitNeighbor(input);
+        return;
+      }
+      advance();
       return;
     }
     if (feedback === "idle") {
       if (!input.trim()) return;
       submitAnswer(input);
-    } else {
-      advance();
+      return;
     }
+    if (feedback === "incorrect" && !retyped) {
+      if (!input.trim()) return;
+      if (isCloseMatch(input, borderMatchCandidates(current))) {
+        setRetyped(true);
+      } else {
+        triggerShake();
+      }
+      return;
+    }
+    advance();
   }
 
   if (!current) return null;
@@ -394,13 +432,13 @@ export function BorderPlay({
               </div>
             </div>
 
-            {isNameNeighbors && feedback === "idle" && (
+            {isNameNeighbors && feedback !== "correct" && (
               <p className="text-center text-xs uppercase tracking-wide text-ink-soft dark:text-ink-soft-dark">
                 {foundNeighborCca3s.size} / {current.neighbors.length} found
               </p>
             )}
 
-            {hint && isNameNeighbors && feedback === "idle" && (
+            {hint && isNameNeighbors && feedback !== "correct" && (
               <p
                 className={`rounded-full bg-paper-card/90 px-3 py-1 text-center text-sm shadow-sm backdrop-blur dark:bg-paper-card-dark/90 ${
                   hint.kind === "already"
@@ -420,7 +458,7 @@ export function BorderPlay({
                 title="Give up on this one"
                 aria-label="Give up on this one"
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-cat-red shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 dark:bg-paper-card-dark/95 dark:text-cat-red-dark ${
-                  feedback === "idle" ? "opacity-100" : "pointer-events-none spin-slow opacity-40"
+                  feedback === "idle" ? "opacity-100" : "pointer-events-none opacity-40"
                 }`}
               >
                 🏳️
@@ -431,16 +469,30 @@ export function BorderPlay({
                   ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  readOnly={feedback !== "idle"}
-                  placeholder={isNameNeighbors ? "Type a country" : "Type your answer"}
+                  readOnly={canAdvance}
+                  placeholder={
+                    isNameNeighbors
+                      ? "Type a country"
+                      : feedback === "incorrect" && !retyped
+                        ? "Type it back to lock it in"
+                        : "Type your answer"
+                  }
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
                   className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
                     feedback === "correct" ? "border-cat-green dark:border-cat-green-dark" : "border-border dark:border-border-dark"
-                  } ${(feedback === "incorrect" && !gaveUp) || hint?.kind === "wrong" || hint?.kind === "unknown" ? "shake-subtle" : ""}`}
+                  } ${
+                    isNameNeighbors
+                      ? hint?.kind === "wrong" || hint?.kind === "unknown"
+                        ? "shake-subtle"
+                        : ""
+                      : shaking
+                        ? "shake-subtle"
+                        : ""
+                  }`}
                 />
-                {feedback === "idle" && (
+                {!canAdvance && (
                   <button
                     type="submit"
                     aria-label="Submit answer"
@@ -449,7 +501,7 @@ export function BorderPlay({
                     ✈
                   </button>
                 )}
-                {feedback === "correct" && (
+                {canAdvance && (
                   <span
                     aria-hidden="true"
                     className="pop-in absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-cat-green text-white shadow-md dark:bg-cat-green-dark"
@@ -464,18 +516,17 @@ export function BorderPlay({
                 type="button"
                 onClick={() => {
                   if (feedback === "idle") skip();
-                  else if (feedback === "incorrect") advance();
                 }}
-                disabled={feedback === "correct"}
-                title={feedback === "incorrect" ? "Next question" : "Skip"}
-                aria-label={feedback === "incorrect" ? "Next question" : "Skip"}
+                disabled={feedback !== "idle"}
+                title={feedback === "idle" ? "Skip" : "Next question"}
+                aria-label={feedback === "idle" ? "Skip" : "Next question"}
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full shadow-sm transition-all duration-300 hover:scale-105 ${
-                  feedback === "incorrect"
-                    ? `text-white shadow-md ${accentSolidClass(ACCENT)}`
-                    : "bg-paper-card/95 text-ink-soft backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
-                } ${feedback === "correct" ? "pointer-events-none spin-slow opacity-40" : ""}`}
+                  feedback === "idle"
+                    ? "bg-paper-card/95 text-ink-soft backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+                    : `text-white shadow-md ${accentSolidClass(ACCENT)}`
+                } ${feedback === "idle" ? "" : canAdvance ? "pointer-events-none spin-slow opacity-40" : "pointer-events-none opacity-40"}`}
               >
-                {feedback === "incorrect" ? "→" : "⏭"}
+                {feedback === "idle" ? "⏭" : "→"}
               </button>
             </div>
           </form>

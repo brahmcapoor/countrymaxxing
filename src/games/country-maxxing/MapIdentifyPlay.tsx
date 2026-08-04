@@ -8,8 +8,15 @@ import { accentSolidClass } from "../../core/palette";
 import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
+import { useShake } from "../../core/useShake";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
-import { buildMapIdentifyQueue, recordMapIdentifyAttempt, type SessionType } from "./engine";
+import {
+  buildMapIdentifyQueue,
+  capitalMatchCandidates,
+  recordMapIdentifyAttempt,
+  requeueAfterMiss,
+  type SessionType,
+} from "./engine";
 
 const ACCENT = "red"; // matches CountryMaxxing.tsx's accent
 
@@ -51,6 +58,15 @@ export function MapIdentifyPlay({
   // See PromptAndAnswerPlay.tsx's matching comment — distinguishes "you
   // tried and missed" copy/shake from "you asked to be shown."
   const [gaveUp, setGaveUp] = useState(false);
+  // Same retype-to-advance idea as PromptAndAnswerPlay.tsx, but per field —
+  // country and capital are independent skills here (see MAP_IDENTIFY_TAG
+  // vs MAP_IDENTIFY_CAPITAL_TAG in engine.ts), so only the field(s) actually
+  // gotten wrong need retyping; a field answered correctly the first time
+  // starts already confirmed.
+  const [countryConfirmed, setCountryConfirmed] = useState(false);
+  const [capitalConfirmed, setCapitalConfirmed] = useState(false);
+  const { shaking: countryShaking, trigger: triggerCountryShake } = useShake();
+  const { shaking: capitalShaking, trigger: triggerCapitalShake } = useShake();
 
   // See PromptAndAnswerPlay.tsx's matching comment — same iOS Safari
   // keyboard-covers-input fix. Unlike the other modes, the map here is NOT
@@ -61,6 +77,7 @@ export function MapIdentifyPlay({
   const bottomBarStyle = keyboardInset > 0 ? { bottom: keyboardInset + 16 } : undefined;
 
   const countryInputRef = useRef<HTMLInputElement>(null);
+  const capitalInputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
   // Always points at the latest advance() closure so the auto-advance timer
   // below never fires a stale one (e.g. after jumping to a skipped country).
@@ -87,37 +104,49 @@ export function MapIdentifyPlay({
   // every render keeps the ref current before any effect can read it.
   advanceRef.current = advance;
 
-  useEffect(() => {
-    if (feedback === "idle") countryInputRef.current?.focus();
-    else nextButtonRef.current?.focus();
-  }, [feedback, current?.cca3]);
+  // Reading the correct answer alone barely builds retrieval — require
+  // producing each wrong field back once (not scored, not a new attempt)
+  // before it's confirmed. canAdvance mirrors PromptAndAnswerPlay.tsx's.
+  const canAdvance = feedback === "answered" && countryConfirmed && (capitalConfirmed || !askCapital);
 
-  // A fully correct answer auto-advances after a beat; anything wrong waits
-  // for a manual Next so there's time to read the correction. The effect's
-  // own cleanup (on feedback/cca3 change) cancels a pending timer — no
-  // manual clearing needed in advance()/skip()/jumpTo().
   useEffect(() => {
-    if (feedback !== "answered" || !result?.countryCorrect || !(result.capitalCorrect || !askCapital)) return;
+    if (feedback === "idle" || (feedback === "answered" && !countryConfirmed)) {
+      countryInputRef.current?.focus();
+    } else if (feedback === "answered" && askCapital && !capitalConfirmed) {
+      capitalInputRef.current?.focus();
+    } else {
+      nextButtonRef.current?.focus();
+    }
+  }, [feedback, countryConfirmed, capitalConfirmed, askCapital, current?.cca3]);
+
+  // Auto-advances once every field is confirmed — whether it was right the
+  // first time or retyped after a miss — same beat as a correct answer
+  // always got. The effect's own cleanup (on canAdvance/cca3 change) cancels
+  // a pending timer — no manual clearing needed in advance()/skip()/jumpTo().
+  useEffect(() => {
+    if (!canAdvance) return;
     const timeout = setTimeout(() => advanceRef.current(), 800);
     return () => clearTimeout(timeout);
-  }, [feedback, current?.cca3, result, askCapital]);
+  }, [canAdvance, current?.cca3]);
 
   // Whichever field(s) were wrong shake themselves clear rather than sitting
   // there readOnly with the wrong guess — a correct field stays put since
-  // there's nothing to fix there.
+  // there's nothing to fix there. Only for the original wrong guess, not
+  // give-up (nothing to shake about) or a failed retype (that shakes
+  // in-place instead — see handleSubmit/maybeAutoSubmit).
   useEffect(() => {
-    if (feedback !== "answered" || !result) return;
+    if (feedback !== "answered" || !result || gaveUp) return;
     const timeout = setTimeout(() => {
       if (!result.countryCorrect) setCountryInput("");
       if (askCapital && !result.capitalCorrect) setCapitalInput("");
     }, 350);
     return () => clearTimeout(timeout);
-  }, [feedback, current?.cca3, result, askCapital]);
+  }, [feedback, current?.cca3, result, askCapital, gaveUp]);
 
-  function submitAnswer(nextCountryInput: string, nextCapitalInput: string) {
+  function submitAnswer(nextCountryInput: string, nextCapitalInput: string, isGiveUp = false) {
     if (!current) return;
     const countryCorrect = isCloseMatch(nextCountryInput, [current.name, ...current.altNames]);
-    const capitalCorrect = !askCapital || isCloseMatch(nextCapitalInput, current.capitals);
+    const capitalCorrect = !askCapital || isCloseMatch(nextCapitalInput, capitalMatchCandidates(current));
     recordMapIdentifyAttempt(current, countryCorrect, askCapital, capitalCorrect);
     const fullyCorrect = countryCorrect && capitalCorrect;
     if (fullyCorrect) {
@@ -126,7 +155,14 @@ export function MapIdentifyPlay({
     } else {
       playIncorrect();
       setCombo(0);
+      if (!isGiveUp) {
+        if (!countryCorrect) triggerCountryShake();
+        if (askCapital && !capitalCorrect) triggerCapitalShake();
+      }
     }
+    setGaveUp(isGiveUp);
+    setCountryConfirmed(countryCorrect);
+    setCapitalConfirmed(capitalCorrect);
     setResult({ countryCorrect, capitalCorrect });
     setScore((s) => ({ correct: s.correct + (fullyCorrect ? 1 : 0), total: s.total + 1 }));
     setFeedback("answered");
@@ -136,7 +172,7 @@ export function MapIdentifyPlay({
     if (!current) return;
     const requeue = sessionType === "learn" && !(result?.countryCorrect && (result?.capitalCorrect ?? true));
     const rest = queue.slice(1);
-    const nextQueue = requeue ? [...rest, current] : rest;
+    const nextQueue = requeue ? requeueAfterMiss(rest, current) : rest;
 
     setSkippedKeys((prev) => {
       const next = new Set(prev);
@@ -149,6 +185,8 @@ export function MapIdentifyPlay({
     setResult(null);
     setFeedback("idle");
     setGaveUp(false);
+    setCountryConfirmed(false);
+    setCapitalConfirmed(false);
     if (nextQueue.length === 0) onExit(score);
   }
 
@@ -175,8 +213,7 @@ export function MapIdentifyPlay({
   // think I can get this later," Give Up is for "just show me."
   function giveUp() {
     if (!current || feedback !== "idle") return;
-    setGaveUp(true);
-    submitAnswer("", "");
+    submitAnswer("", "", true);
   }
 
   function handleSubmit(e: FormEvent) {
@@ -184,16 +221,44 @@ export function MapIdentifyPlay({
     if (feedback === "idle") {
       if (!countryInput.trim() || (askCapital && !capitalInput.trim())) return;
       submitAnswer(countryInput, capitalInput);
-    } else {
-      advance();
+      return;
     }
+    if (!canAdvance) {
+      if (!current) return;
+      // Retyping — confirm whichever field(s) now match (typo-tolerant,
+      // not a new scored attempt), shake whichever still don't. Once every
+      // field is confirmed, canAdvance's own effect handles the advance.
+      if (!countryConfirmed) {
+        if (isCloseMatch(countryInput, [current.name, ...current.altNames])) setCountryConfirmed(true);
+        else triggerCountryShake();
+      }
+      if (askCapital && !capitalConfirmed) {
+        if (isCloseMatch(capitalInput, capitalMatchCandidates(current))) setCapitalConfirmed(true);
+        else triggerCapitalShake();
+      }
+      return;
+    }
+    advance();
   }
 
   function maybeAutoSubmit(nextCountryInput: string, nextCapitalInput: string) {
-    if (!current || feedback !== "idle") return;
-    const countryOk = isExactMatch(nextCountryInput, [current.name, ...current.altNames]);
-    const capitalOk = !askCapital || isExactMatch(nextCapitalInput, current.capitals);
-    if (countryOk && capitalOk) submitAnswer(nextCountryInput, nextCapitalInput);
+    if (!current) return;
+    if (feedback === "idle") {
+      const countryOk = isExactMatch(nextCountryInput, [current.name, ...current.altNames]);
+      const capitalOk = !askCapital || isExactMatch(nextCapitalInput, capitalMatchCandidates(current));
+      if (countryOk && capitalOk) submitAnswer(nextCountryInput, nextCapitalInput);
+      return;
+    }
+    // Retyping — this mode already auto-submits live while typing (the map
+    // itself is the spoiler-safe "answer," so there's no tell to leak by
+    // moving the moment you finish typing); the retype confirmation stays
+    // consistent with that instead of suddenly requiring an explicit Enter.
+    if (!countryConfirmed && isExactMatch(nextCountryInput, [current.name, ...current.altNames])) {
+      setCountryConfirmed(true);
+    }
+    if (askCapital && !capitalConfirmed && isExactMatch(nextCapitalInput, capitalMatchCandidates(current))) {
+      setCapitalConfirmed(true);
+    }
   }
 
   if (!current) return null;
@@ -308,7 +373,7 @@ export function MapIdentifyPlay({
                 title="Give up on this one"
                 aria-label="Give up on this one"
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-cat-red shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 dark:bg-paper-card-dark/95 dark:text-cat-red-dark ${
-                  feedback === "idle" ? "opacity-100" : "pointer-events-none spin-slow opacity-40"
+                  feedback === "idle" ? "opacity-100" : "pointer-events-none opacity-40"
                 }`}
               >
                 🏳️
@@ -324,17 +389,19 @@ export function MapIdentifyPlay({
                       setCountryInput(value);
                       maybeAutoSubmit(value, capitalInput);
                     }}
-                    readOnly={feedback !== "idle"}
-                    placeholder="Which country is highlighted?"
+                    readOnly={feedback === "answered" && countryConfirmed}
+                    placeholder={
+                      feedback === "answered" && !countryConfirmed
+                        ? "Type it back to lock it in"
+                        : "Which country is highlighted?"
+                    }
                     autoCorrect="off"
                     autoCapitalize="off"
                     spellCheck={false}
                     className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${askCapital ? "pr-5" : "pr-14"} ${
-                      feedback === "answered" && result
-                        ? result.countryCorrect
-                          ? "border-cat-green dark:border-cat-green-dark"
-                          : `border-border dark:border-border-dark ${gaveUp ? "" : "shake-subtle"}`
-                        : "border-border dark:border-border-dark"
+                      feedback === "answered" && countryConfirmed
+                        ? "border-cat-green dark:border-cat-green-dark"
+                        : `border-border dark:border-border-dark ${countryShaking ? "shake-subtle" : ""}`
                     }`}
                   />
                   {feedback === "idle" && !askCapital && (
@@ -350,23 +417,24 @@ export function MapIdentifyPlay({
                 {askCapital && (
                   <div className="relative">
                     <input
+                      ref={capitalInputRef}
                       value={capitalInput}
                       onChange={(e) => {
                         const value = e.target.value;
                         setCapitalInput(value);
                         maybeAutoSubmit(countryInput, value);
                       }}
-                      readOnly={feedback !== "idle"}
-                      placeholder="And its capital?"
+                      readOnly={feedback === "answered" && capitalConfirmed}
+                      placeholder={
+                        feedback === "answered" && !capitalConfirmed ? "Type it back to lock it in" : "And its capital?"
+                      }
                       autoCorrect="off"
                       autoCapitalize="off"
                       spellCheck={false}
                       className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
-                        feedback === "answered" && result
-                          ? result.capitalCorrect
-                            ? "border-cat-green dark:border-cat-green-dark"
-                            : `border-border dark:border-border-dark ${gaveUp ? "" : "shake-subtle"}`
-                          : "border-border dark:border-border-dark"
+                        feedback === "answered" && capitalConfirmed
+                          ? "border-cat-green dark:border-cat-green-dark"
+                          : `border-border dark:border-border-dark ${capitalShaking ? "shake-subtle" : ""}`
                       }`}
                     />
                     {feedback === "idle" && (
@@ -389,7 +457,7 @@ export function MapIdentifyPlay({
                 title="Skip"
                 aria-label="Skip"
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-ink-soft shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark ${
-                  feedback === "idle" ? "opacity-100" : "pointer-events-none spin-slow opacity-40"
+                  feedback === "idle" ? "opacity-100" : "pointer-events-none opacity-40"
                 }`}
               >
                 ⏭
@@ -399,10 +467,10 @@ export function MapIdentifyPlay({
                 <button
                   ref={nextButtonRef}
                   type="submit"
-                  disabled={feedback !== "answered"}
-                  tabIndex={feedback === "answered" ? 0 : -1}
+                  disabled={!canAdvance}
+                  tabIndex={canAdvance ? 0 : -1}
                   className={`w-full cursor-pointer rounded-full py-3 font-medium text-white shadow-lg transition-all duration-300 hover:opacity-90 ${accentSolidClass(ACCENT)} ${
-                    feedback === "answered"
+                    canAdvance
                       ? "pointer-events-auto translate-y-0 opacity-100"
                       : "pointer-events-none -translate-y-1 opacity-0"
                   }`}
