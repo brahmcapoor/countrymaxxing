@@ -13,6 +13,9 @@ import { MapIdentifyPlay, type MapIdentifyResult } from "./MapIdentifyPlay";
 import { PromptAndAnswerPlay, type PromptAndAnswerResult } from "./PromptAndAnswerPlay";
 import { BorderPlay, type BorderResult } from "./BorderPlay";
 import { PassportPage } from "./PassportPage";
+import { ReviewDrawer } from "./ReviewDrawer";
+import { ReviewMap } from "./ReviewMap";
+import { reviewList, roundBreakdown, type TalliedItem } from "../../core/sessionTally";
 import {
   borderEligiblePool,
   nameAllListLabel,
@@ -115,6 +118,10 @@ export function CountryMaxxing() {
   const [remainingOnGiveUp, setRemainingOnGiveUp] = useState<
     { cca3: string; region: string; label: string; flag: string }[] | null
   >(null);
+  // Populated by every format except Manifest (free recall doesn't fit the
+  // same per-item-attempt model) — feeds the round breakdown and review
+  // drawer below the mastered/missed grid on the shared summary screen.
+  const [sessionTally, setSessionTally] = useState<TalliedItem[]>([]);
   const [celebrate, setCelebrate] = useState(false);
   const [bragLine, setBragLine] = useState<string | null>(null);
 
@@ -208,6 +215,7 @@ export function CountryMaxxing() {
     setScore({ correct: 0, total: 0 });
     setNameAllResult(null);
     setRemainingOnGiveUp(null);
+    setSessionTally([]);
     setPhase("play");
   }
 
@@ -229,6 +237,7 @@ export function CountryMaxxing() {
     }
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
+    setSessionTally(result.sessionTally);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -243,6 +252,7 @@ export function CountryMaxxing() {
     }
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
+    setSessionTally(result.sessionTally);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -257,6 +267,7 @@ export function CountryMaxxing() {
     }
     setScore(result);
     setRemainingOnGiveUp(result.remaining ?? null);
+    setSessionTally(result.sessionTally);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -364,6 +375,12 @@ export function CountryMaxxing() {
       sortedSummaryGroups = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
     }
 
+    // Only worth a line when something actually needed a second look — a
+    // clean single pass through the queue makes "Round 1: N/N" redundant
+    // with the mastered-count line right above it.
+    const rounds = roundBreakdown(sessionTally);
+    const showRounds = rounds.length > 1;
+
     return (
       <div className="mx-auto max-w-2xl px-4 text-center">
         <Confetti active={celebrate} />
@@ -417,6 +434,13 @@ export function CountryMaxxing() {
             )}
           </>
         )}
+        {showRounds && (
+          <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">
+            {rounds.map((r) => `Round ${r.round}: ${r.correct}/${r.total}`).join(" · ")}
+          </p>
+        )}
+        {sessionTally.length > 0 && <ReviewMap pool={pool} sessionTally={sessionTally} />}
+        <ReviewDrawer items={reviewList(sessionTally)} />
         <button
           onClick={playAgain}
           className={`mt-6 w-full rounded-md py-3 font-medium text-white transition-opacity hover:opacity-90 ${accentSolidClass(ACCENT)}`}

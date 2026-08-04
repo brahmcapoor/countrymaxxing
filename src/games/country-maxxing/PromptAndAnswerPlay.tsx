@@ -10,6 +10,7 @@ import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
 import { recordAttempt } from "../../core/stats";
+import { useSessionTally, type TalliedItem } from "../../core/sessionTally";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   buildQueue,
@@ -34,6 +35,9 @@ export interface PromptAndAnswerResult {
    * along so the summary screen can group these by region the same way
    * Manifest's summary does. */
   remaining?: { cca3: string; region: string; label: string; flag: string }[];
+  /** Every attempt this session, per country — feeds the summary screen's
+   * round breakdown, review drawer, and difficulty-tinted map. */
+  sessionTally: TalliedItem[];
 }
 
 export function PromptAndAnswerPlay({
@@ -66,6 +70,7 @@ export function PromptAndAnswerPlay({
   // unlocks. See handleSubmit and the readOnly/button logic below.
   const [retyped, setRetyped] = useState(false);
   const { shaking, trigger: triggerShake } = useShake();
+  const sessionTally = useSessionTally();
   // Countries already answered correctly — kept highlighted (with a capital
   // dot) after moving on, instead of only ever showing the current one, so
   // the map reads as a running progress trail.
@@ -138,6 +143,11 @@ export function PromptAndAnswerPlay({
     if (!current) return;
     const correct = isCloseMatch(answer, matchCandidates(current));
     recordAttempt(NAMESPACE, questionKey(current), correct);
+    sessionTally.record(
+      { cca3: current.country.cca3, label: current.country.name, flag: current.country.flag },
+      correct,
+      isGiveUp,
+    );
     if (correct) {
       playCorrect();
       setCombo((c) => c + 1);
@@ -184,7 +194,7 @@ export function PromptAndAnswerPlay({
     setFeedback("idle");
     setGaveUp(false);
     setRetyped(false);
-    if (nextQueue.length === 0) onExit(score);
+    if (nextQueue.length === 0) onExit({ ...score, sessionTally: sessionTally.getItems() });
   }
 
   function skip() {

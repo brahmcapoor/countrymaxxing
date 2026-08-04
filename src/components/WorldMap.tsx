@@ -75,6 +75,25 @@ function longitudeSpan(f: CountryFeature): number {
   return span < 0 ? span + 360 : span;
 }
 
+// Summary-screen "difficulty tint" mode — see reviewTierByCcn3 below.
+// Mutually exclusive with the play-mode current/wrong/filled coloring
+// (a country is never rendered in both modes at once), so this is a
+// completely separate palette rather than another branch of fillClassFor.
+function reviewFillClassFor(tier: 0 | 1 | 2 | 3, inScope: boolean): string {
+  switch (tier) {
+    case 3: // 2+ misses, or given up on
+      return "fill-cat-red stroke-paper-card dark:fill-cat-red-dark dark:stroke-paper-card-dark";
+    case 2: // exactly 1 miss
+      return "fill-cat-orange stroke-paper-card dark:fill-cat-orange-dark dark:stroke-paper-card-dark";
+    case 1: // right first try, every time
+      return "fill-cat-green/70 stroke-paper-card dark:fill-cat-green-dark/70 dark:stroke-paper-card-dark";
+    default: // not asked this session
+      return inScope
+        ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
+        : "fill-black/2 stroke-border/30 dark:fill-white/4 dark:stroke-border-dark/30";
+  }
+}
+
 function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, inScope: boolean): string {
   if (isCurrent) {
     // The question currently on screen — a warm yellow so it reads as "you
@@ -116,6 +135,7 @@ export function WorldMap({
   filledCcn3s,
   currentCcn3,
   wrongCcn3s,
+  reviewTierByCcn3,
   focusCcn3s,
   labelsByCcn3,
   capitalDots,
@@ -134,6 +154,12 @@ export function WorldMap({
    * rendered in its own "needs another look" color, checked before
    * filledCcn3s so a country can't be both. */
   wrongCcn3s?: Set<string>;
+  /** Summary-screen "how hard was this one this session" tint, keyed by
+   * ccn3 — 0 (or absent) = not asked, 1 = right first try every time, 2 =
+   * missed once, 3 = missed 2+ times or given up on. When present, this
+   * completely replaces the current/wrong/filled coloring for every
+   * feature (a play session and a review map are never shown at once). */
+  reviewTierByCcn3?: Map<string, 0 | 1 | 2 | 3>;
   /** Restrict the projection's fit to just these countries (e.g. the active
    * region selection) so a small selection zooms in rather than rendering at
    * whole-world scale. Also used to fade out countries visible in the fit
@@ -286,12 +312,14 @@ export function WorldMap({
           strokeWidth={0.5}
           vectorEffect="non-scaling-stroke"
           className={
-            fillClassFor(
-              currentCcn3 !== undefined && f.id === currentCcn3,
-              !!wrongCcn3s?.has(f.id),
-              filledCcn3s.has(f.id),
-              inScope,
-            ) + popClass
+            (reviewTierByCcn3
+              ? reviewFillClassFor(reviewTierByCcn3.get(f.id) ?? 0, inScope)
+              : fillClassFor(
+                  currentCcn3 !== undefined && f.id === currentCcn3,
+                  !!wrongCcn3s?.has(f.id),
+                  filledCcn3s.has(f.id),
+                  inScope,
+                )) + popClass
           }
         />
       );
@@ -320,12 +348,14 @@ export function WorldMap({
                 strokeWidth={0.5}
                 vectorEffect="non-scaling-stroke"
                 className={
-                  fillClassFor(
-                    currentCcn3 !== undefined && id === currentCcn3,
-                    !!wrongCcn3s?.has(id),
-                    filledCcn3s.has(id),
-                    inScope,
-                  ) + popClass
+                  (reviewTierByCcn3
+                    ? reviewFillClassFor(reviewTierByCcn3.get(id) ?? 0, inScope)
+                    : fillClassFor(
+                        currentCcn3 !== undefined && id === currentCcn3,
+                        !!wrongCcn3s?.has(id),
+                        filledCcn3s.has(id),
+                        inScope,
+                      )) + popClass
                 }
               />
             );
@@ -382,6 +412,7 @@ export function WorldMap({
     filledCcn3s,
     currentCcn3,
     wrongCcn3s,
+    reviewTierByCcn3,
     focusCcn3s,
     capitalDots,
     pointCountries,

@@ -9,6 +9,7 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
+import { useSessionTally, type TalliedItem } from "../../core/sessionTally";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   buildMapIdentifyQueue,
@@ -33,6 +34,9 @@ export interface MapIdentifyResult {
    * along so the summary screen can group these by region the same way
    * Manifest's summary does. */
   remaining?: { cca3: string; region: string; label: string; flag: string }[];
+  /** Every attempt this session, per country — feeds the summary screen's
+   * round breakdown, review drawer, and difficulty-tinted map. */
+  sessionTally: TalliedItem[];
 }
 
 export function MapIdentifyPlay({
@@ -67,6 +71,7 @@ export function MapIdentifyPlay({
   const [capitalConfirmed, setCapitalConfirmed] = useState(false);
   const { shaking: countryShaking, trigger: triggerCountryShake } = useShake();
   const { shaking: capitalShaking, trigger: triggerCapitalShake } = useShake();
+  const sessionTally = useSessionTally();
 
   // See PromptAndAnswerPlay.tsx's matching comment — same iOS Safari
   // keyboard-covers-input fix. Unlike the other modes, the map here is NOT
@@ -149,6 +154,7 @@ export function MapIdentifyPlay({
     const capitalCorrect = !askCapital || isCloseMatch(nextCapitalInput, capitalMatchCandidates(current));
     recordMapIdentifyAttempt(current, countryCorrect, askCapital, capitalCorrect);
     const fullyCorrect = countryCorrect && capitalCorrect;
+    sessionTally.record({ cca3: current.cca3, label: current.name, flag: current.flag }, fullyCorrect, isGiveUp);
     if (fullyCorrect) {
       playCorrect();
       setCombo((c) => c + 1);
@@ -187,7 +193,7 @@ export function MapIdentifyPlay({
     setGaveUp(false);
     setCountryConfirmed(false);
     setCapitalConfirmed(false);
-    if (nextQueue.length === 0) onExit(score);
+    if (nextQueue.length === 0) onExit({ ...score, sessionTally: sessionTally.getItems() });
   }
 
   function skip() {

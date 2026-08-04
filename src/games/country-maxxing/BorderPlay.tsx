@@ -9,6 +9,7 @@ import { comboClass, comboEmoji, comboTier } from "../../core/combo";
 import { playCorrect, playIncorrect } from "../../core/sound";
 import { useKeyboardInset } from "../../core/useKeyboardInset";
 import { useShake } from "../../core/useShake";
+import { useSessionTally, type TalliedItem } from "../../core/sessionTally";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   borderExpectedAnswer,
@@ -32,6 +33,9 @@ export interface BorderResult {
    * mode. cca3/region ride along so the summary screen can group these by
    * region the same way the other modes' summaries do. */
   remaining?: { cca3: string; region: string; label: string; flag: string }[];
+  /** Every attempt this session, per country — feeds the summary screen's
+   * round breakdown, review drawer, and difficulty-tinted map. */
+  sessionTally: TalliedItem[];
 }
 
 export function BorderPlay({
@@ -67,6 +71,7 @@ export function BorderPlay({
   // "has everything been retyped back" signal (see canAdvance below).
   const [retyped, setRetyped] = useState(false);
   const { shaking, trigger: triggerShake } = useShake();
+  const sessionTally = useSessionTally();
   // Countries whose question has been fully answered correctly / answered
   // wrong (or given up on) — same "current vs wrong vs done" map convention
   // as the other modes, keyed to the question's *subject* country.
@@ -144,6 +149,11 @@ export function BorderPlay({
     if (!current) return;
     const correct = isCloseMatch(answer, borderMatchCandidates(current));
     recordBorderAttempt(current, correct);
+    sessionTally.record(
+      { cca3: current.country.cca3, label: current.country.name, flag: current.country.flag },
+      correct,
+      isGiveUp,
+    );
     if (correct) {
       playCorrect();
       setCombo((c) => c + 1);
@@ -205,6 +215,10 @@ export function BorderPlay({
     // win, just unlock the advance.
     if (feedback === "idle" && nextFound.size === current.neighbors.length) {
       recordBorderAttempt(current, true);
+      sessionTally.record(
+        { cca3: current.country.cca3, label: current.country.name, flag: current.country.flag },
+        true,
+      );
       setCombo((c) => c + 1);
       setScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
       setFeedback("correct");
@@ -242,7 +256,7 @@ export function BorderPlay({
     setHint(null);
     setGaveUp(false);
     setRetyped(false);
-    if (nextQueue.length === 0) onExit(score);
+    if (nextQueue.length === 0) onExit({ ...score, sessionTally: sessionTally.getItems() });
   }
 
   // For "name-neighbors" specifically: give up on this country (not the
@@ -252,6 +266,11 @@ export function BorderPlay({
     if (!current || !isNameNeighbors) return;
     if (foundNeighborCca3s.size < current.neighbors.length) {
       recordBorderAttempt(current, false);
+      sessionTally.record(
+        { cca3: current.country.cca3, label: current.country.name, flag: current.country.flag },
+        false,
+        true,
+      );
     }
     setFeedback("incorrect");
   }
