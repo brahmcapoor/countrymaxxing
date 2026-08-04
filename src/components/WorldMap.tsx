@@ -83,8 +83,13 @@ function reviewFillClassFor(tier: 0 | 1 | 2 | 3, inScope: boolean): string {
   switch (tier) {
     case 3: // 2+ misses, or given up on
       return "fill-cat-red stroke-paper-card dark:fill-cat-red-dark dark:stroke-paper-card-dark";
-    case 2: // exactly 1 miss
-      return "fill-cat-orange stroke-paper-card dark:fill-cat-orange-dark dark:stroke-paper-card-dark";
+    case 2: // exactly 1 miss — yellow, not orange: orange sits only ~10-15°
+      // of hue away from red (worse in dark mode, ~5°), reading as barely
+      // distinguishable "different shades of red-orange" rather than a
+      // clear step down in severity. Yellow keeps the familiar traffic-
+      // light green/yellow/red progression with real hue separation from
+      // both neighbors.
+      return "fill-cat-yellow stroke-paper-card dark:fill-cat-yellow-dark dark:stroke-paper-card-dark";
     case 1: // right first try, every time
       return "fill-cat-green/70 stroke-paper-card dark:fill-cat-green-dark/70 dark:stroke-paper-card-dark";
     default: // not asked this session
@@ -106,8 +111,12 @@ function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, i
   if (isWrong) {
     // Answered incorrectly and not yet redeemed — full-strength (not faded
     // like "done") so it stands out as something to come back to. Dark mode
-    // uses orange rather than red since red-dark is already "correct" there.
-    return "fill-cat-red stroke-paper-card dark:fill-cat-orange-dark dark:stroke-paper-card-dark";
+    // can't reuse orange here: cat-orange-dark (#d95926) and cat-red-dark
+    // (#f2603c, "done"'s color there — see below) sit only ~5° apart in hue,
+    // reading as near-identical shades of orange-red side by side. Violet is
+    // maximally separated from both that red and the current-question
+    // yellow, and isn't otherwise used for a fill state in this component.
+    return "fill-cat-red stroke-paper-card dark:fill-cat-violet-dark dark:stroke-paper-card-dark";
   }
   if (isFilled) {
     // Dark mode matches CountryMaxxing's red accent — vivid against navy.

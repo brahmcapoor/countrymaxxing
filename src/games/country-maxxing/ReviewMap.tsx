@@ -6,7 +6,7 @@ import type { TalliedItem } from "../../core/sessionTally";
 
 const LEGEND: { tier: 1 | 2 | 3; label: string; swatchClass: string }[] = [
   { tier: 1, label: "Right first try", swatchClass: "bg-cat-green/70 dark:bg-cat-green-dark/70" },
-  { tier: 2, label: "Missed once", swatchClass: "bg-cat-orange dark:bg-cat-orange-dark" },
+  { tier: 2, label: "Missed once", swatchClass: "bg-cat-yellow dark:bg-cat-yellow-dark" },
   { tier: 3, label: "Missed 2+ / gave up", swatchClass: "bg-cat-red dark:bg-cat-red-dark" },
 ];
 
