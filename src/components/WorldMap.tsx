@@ -181,6 +181,7 @@ export function WorldMap({
   const [loadingMessage] = useState(randomLoadingMessage);
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
   const prevFilledRef = useRef<Set<string>>(new Set());
 
@@ -431,6 +432,25 @@ export function WorldMap({
     };
   }, [showAutoZoom, autoZoomCenterX, autoZoomCenterY]);
 
+  // In portrait (see the outer div's overflow-x-auto below), the map renders
+  // wider than the viewport and only scrolls horizontally into view — a
+  // highlighted country off in the unscrolled part is otherwise invisible on
+  // mobile without the player manually dragging the map. Center the current
+  // question's country in the scroll container whenever it changes, reusing
+  // the same bounds this memo already computes for the auto-zoom inset. A
+  // no-op on desktop, where the map already fits without horizontal scroll
+  // (maxScroll <= 0).
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const bounds = autoZoomCcn3 ? built?.bounds.get(autoZoomCcn3) : undefined;
+    if (!container || !bounds) return;
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    if (maxScroll <= 0) return;
+    const centerX = (bounds[0] + bounds[2]) / 2;
+    const targetScroll = (centerX / WIDTH) * container.scrollWidth - container.clientWidth / 2;
+    container.scrollTo({ left: Math.max(0, Math.min(maxScroll, targetScroll)), behavior: "smooth" });
+  }, [autoZoomCcn3, built]);
+
   if (!features || !built) {
     return (
       <div
@@ -483,7 +503,7 @@ export function WorldMap({
       {/* Only the map itself scrolls (for the portrait/narrow case) — overlays
           below are positioned relative to this stable outer box instead, so
           they don't inherit the inner scroll container's coordinate space. */}
-      <div className="h-full overflow-x-auto">
+      <div ref={scrollContainerRef} className="h-full overflow-x-auto">
         <svg
           ref={svgRef}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}

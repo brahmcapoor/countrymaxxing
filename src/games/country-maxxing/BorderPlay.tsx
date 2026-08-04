@@ -440,6 +440,9 @@ export function BorderPlay({
                   onChange={(e) => setInput(e.target.value)}
                   readOnly={feedback !== "idle"}
                   placeholder={isNameNeighbors ? "Type a country" : "Type your answer"}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   className={`w-full rounded-full border bg-paper-card/95 py-3 pl-5 pr-14 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${
                     feedback === "correct" ? "border-cat-green dark:border-cat-green-dark" : "border-border dark:border-border-dark"
                   } ${feedback === "incorrect" || hint?.kind === "wrong" || hint?.kind === "unknown" ? "shake-subtle" : ""}`}

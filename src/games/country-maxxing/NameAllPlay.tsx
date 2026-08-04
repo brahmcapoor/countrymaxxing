@@ -285,6 +285,9 @@ export function NameAllPlay({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={subject === "countries" ? "Type a country" : "Type a capital"}
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               className={`w-full rounded-full border border-border bg-paper-card/95 px-5 py-3 text-center text-lg text-ink shadow-lg outline-none backdrop-blur focus:ring-2 focus:ring-cat-blue dark:border-border-dark dark:bg-paper-card-dark/95 dark:text-ink-dark dark:focus:ring-cat-red-dark ${hint?.kind === "unknown" ? "shake-once" : ""}`}
             />
           </form>
