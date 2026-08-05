@@ -750,7 +750,18 @@ export function WorldMap({
     ? Math.max(autoZoomBounds[2] - autoZoomBounds[0], autoZoomBounds[3] - autoZoomBounds[1])
     : 0;
   const isAlwaysInset = !!autoZoomCcn3 && !!alwaysInsetCcn3s?.has(autoZoomCcn3);
-  const showAutoZoom = !!autoZoomBounds && (isAlwaysInset || autoZoomSize < SMALL_COUNTRY_THRESHOLD);
+  // The inset only earns its place while the map is at its default fit —
+  // it exists to make a country legible when the player has no other way to
+  // get a closer look. The moment they zoom in manually they're doing that
+  // job themselves, so a floating blow-up of a country they're already
+  // inspecting (or that their own zoom has pushed off-screen) is just
+  // clutter bolted over the map. Hide it for any manual zoom and bring it
+  // straight back at the default view. Same 1.01 epsilon the Reset-zoom
+  // button uses to decide whether there's anything to reset, so the two
+  // can't disagree about what "zoomed in" means.
+  const isDefaultZoom = transform.scale <= 1.01;
+  const showAutoZoom =
+    !!autoZoomBounds && isDefaultZoom && (isAlwaysInset || autoZoomSize < SMALL_COUNTRY_THRESHOLD);
   const autoZoomCenterX = autoZoomBounds ? (autoZoomBounds[0] + autoZoomBounds[2]) / 2 : 0;
   const autoZoomCenterY = autoZoomBounds ? (autoZoomBounds[1] + autoZoomBounds[3]) / 2 : 0;
   const autoZoomCenter = [autoZoomCenterX, autoZoomCenterY];
