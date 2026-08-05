@@ -368,6 +368,12 @@ export function WorldMap({
   // itself.
   const longPressStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  // Mirrors the latest setHoverAt closure (reassigned every render, below) so
+  // the native wheel listener — deliberately scoped to `[projected]` so it
+  // isn't torn down and reattached on every render — can still call the
+  // current render's version instead of a stale one from whenever the
+  // listener was last attached.
+  const setHoverAtRef = useRef<(clientX: number, clientY: number) => void>(() => {});
 
   function applyTransform(next: MapTransform) {
     transformRef.current = next;
@@ -513,6 +519,15 @@ export function WorldMap({
         const nextScale = clampNum(transformRef.current.scale * factor, MIN_SCALE, MAX_SCALE);
         const zoomed = zoomTowards(layout, transformRef.current, e.clientX, e.clientY, e.clientX, e.clientY, nextScale);
         applyTransform(clampTransform(layout, zoomed));
+        // A trackpad pinch reports as ctrl+wheel, not a touch pointer gesture
+        // — it never fires the pointermove-based updateHover, so without
+        // this the magnifier (and the auto-zoom inset, via the `transform`
+        // dependency above) would freeze exactly like the touch pinch case
+        // this same fix addressed for PointerEvent-based gestures. Goes
+        // through the ref (see its declaration) rather than calling
+        // setHoverAt directly since this listener is deliberately not
+        // re-attached on every render.
+        setHoverAtRef.current(e.clientX, e.clientY);
         return;
       }
       if (transformRef.current.scale > 1) {
@@ -526,6 +541,7 @@ export function WorldMap({
           y: transformRef.current.y - e.deltaY,
         };
         applyTransform(clampTransform(layout, next));
+        setHoverAtRef.current(e.clientX, e.clientY);
       }
     }
     svg.addEventListener("wheel", handleWheelNative, { passive: false });
@@ -710,9 +726,14 @@ export function WorldMap({
   // Tracks the auto-zoomed country's real on-screen position (via the main
   // map SVG's screen CTM, same technique as updateHover's inverse) so the
   // inset can float directly above it instead of sitting in a fixed corner
-  // disconnected from what it's showing. Recomputed on resize and on any
-  // scroll (capture-phase, since the map's own portrait-mode horizontal
-  // scroll container is a descendant, not the window).
+  // disconnected from what it's showing. Recomputed on resize, on any scroll
+  // (capture-phase, since the map's own portrait-mode horizontal scroll
+  // container is a descendant, not the window), and on `transform` itself —
+  // getScreenCTM already folds in the pinch/pan/wheel-zoom CSS transform, but
+  // only a fresh read after it changes reflects the new position; without
+  // `transform` in the deps this stayed frozen at wherever the inset was
+  // when a pinch or pan gesture started, the same class of bug the manual
+  // magnifier lens had (see setHoverAt calls in the gesture handlers above).
   useEffect(() => {
     if (!showAutoZoom) {
       setAutoZoomAnchor(null);
@@ -735,7 +756,7 @@ export function WorldMap({
       window.removeEventListener("resize", updateAnchor);
       window.removeEventListener("scroll", updateAnchor, true);
     };
-  }, [showAutoZoom, autoZoomCenterX, autoZoomCenterY]);
+  }, [showAutoZoom, autoZoomCenterX, autoZoomCenterY, transform]);
 
   // In portrait (see the outer div's overflow-x-auto below), the map renders
   // wider than the viewport and only scrolls horizontally into view — a
@@ -798,6 +819,7 @@ export function WorldMap({
       setHover({ mapX: loc.x, mapY: loc.y, clientX, clientY, hoveredId: hitTest(loc.x, loc.y) });
     });
   }
+  setHoverAtRef.current = setHoverAt;
 
   function updateHover(e: ReactPointerEvent<SVGSVGElement>) {
     setHoverAt(e.clientX, e.clientY);
