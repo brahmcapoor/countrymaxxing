@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "d3-geo": "^3.1.1",
+    "framer-motion": "^13.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "topojson-client": "^3.1.0",
