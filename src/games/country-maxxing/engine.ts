@@ -1,6 +1,8 @@
 import { countries as allCountries, type Country } from "../../data/countries";
 import { borderLengthBetween } from "../../data/borderLengths";
 import { getMissWeight, getStat, pickWeighted, recordAttempt } from "../../core/stats";
+import type { TalliedItem } from "../../core/sessionTally";
+import { REVIEW_TIER_MAX_TRIES, type ReviewTier } from "../../components/WorldMap";
 
 export type Direction = "country-to-capital" | "capital-to-country";
 export type DirectionSetting = Direction | "mixed";
@@ -22,6 +24,34 @@ const REQUEUE_GAP = 6;
 export function requeueAfterMiss<T>(rest: T[], item: T): T[] {
   const at = Math.min(REQUEUE_GAP, rest.length);
   return [...rest.slice(0, at), item, ...rest.slice(at)];
+}
+
+// A country's outcome + try count this session, for WorldMap's difficulty-
+// tint coloring (see ReviewTier) — one implementation shared by every
+// mode's post-session summary (ReviewMap.tsx) and, live, by One Stop's own
+// map while playing (PromptAndAnswerPlay.tsx calls this every render off
+// sessionTally.getItems(), which is safe despite sessionTally itself being
+// a plain ref — every record() call is always followed by a sibling
+// setState in the same event, so a re-render (and thus a fresh call here)
+// is already guaranteed without this needing to be reactive on its own).
+export function tierByCcn3(pool: Country[], sessionTally: TalliedItem[]): Map<string, ReviewTier> {
+  const ccn3ByCca3 = new Map(pool.map((c) => [c.cca3, c.ccn3] as const));
+  const tiers = new Map<string, ReviewTier>();
+  for (const item of sessionTally) {
+    const ccn3 = ccn3ByCca3.get(item.cca3);
+    if (!ccn3) continue;
+    // The last attempt is the eventual outcome — Learn mode requeues a miss
+    // until it's answered right, so by the time a country stops being
+    // asked, its final attempt reflects where it landed (Quiz mode never
+    // requeues, so its one attempt is already final).
+    const finalCorrect = item.attempts[item.attempts.length - 1] === true;
+    // A give-up forces the scale's far end regardless of the raw attempt
+    // count — giving up is a stronger "this one was hard" signal than a
+    // single wrong guess.
+    const tries = item.gaveUp ? REVIEW_TIER_MAX_TRIES : item.attempts.length;
+    tiers.set(ccn3, { outcome: finalCorrect ? "correct" : "wrong", tries });
+  }
+  return tiers;
 }
 
 export interface Question {

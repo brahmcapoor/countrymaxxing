@@ -109,10 +109,26 @@ function longitudeSpan(f: CountryFeature): number {
   return span < 0 ? span + 360 : span;
 }
 
-// Summary-screen "difficulty tint" mode — see reviewTierByCcn3 below.
-// Mutually exclusive with the play-mode current/wrong/filled coloring
-// (a country is never rendered in both modes at once), so this is a
-// completely separate palette rather than another branch of fillClassFor.
+// Shared by both coloring modes below — the "you are here" highlight and
+// the "nothing to show yet" default aren't specific to either one, so both
+// fillClassFor (the older isCurrent/isWrong/isFilled boolean mode, still
+// used by Terra Incognita and Frontiers) and reviewFillClassFor (the tier
+// gradient, used by One Stop live and every mode's post-session summary)
+// draw from the same two constants instead of each hand-writing them.
+const CURRENT_FILL_CLASS =
+  "fill-cat-yellow stroke-paper-card dark:fill-cat-yellow-dark dark:stroke-paper-card-dark current-pulse";
+function notAskedFillClass(inScope: boolean): string {
+  return inScope
+    ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
+    : "fill-black/2 stroke-border/30 dark:fill-white/4 dark:stroke-border-dark/30";
+}
+
+// "Difficulty tint" mode — see reviewTierByCcn3 below. Originally
+// summary-screen-only; One Stop now also feeds this live (see
+// PromptAndAnswerPlay.tsx's tierByCcn3), so a country you've already
+// answered recolors immediately instead of staying a flat "done" blue —
+// the current question still wins via isCurrent, same priority order
+// fillClassFor already used.
 //
 // A diverging scale, not a 3-step traffic light: neutral gray sits in the
 // middle for "not asked this session," and each side ramps in *opacity*
@@ -147,26 +163,15 @@ const REVIEW_TIER_FILLS = {
 // instead of an idealized continuous gradient that doesn't.
 export const REVIEW_TIER_MAX_TRIES = REVIEW_TIER_FILLS.correct.length;
 
-function reviewFillClassFor(tier: ReviewTier | undefined, inScope: boolean): string {
-  if (!tier) {
-    // Not asked this session — the scale's neutral midpoint.
-    return inScope
-      ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
-      : "fill-black/2 stroke-border/30 dark:fill-white/4 dark:stroke-border-dark/30";
-  }
+function reviewFillClassFor(isCurrent: boolean, tier: ReviewTier | undefined, inScope: boolean): string {
+  if (isCurrent) return CURRENT_FILL_CLASS;
+  if (!tier) return notAskedFillClass(inScope); // not asked this session — the scale's neutral midpoint
   const step = Math.min(tier.tries, REVIEW_TIER_MAX_TRIES) - 1;
   return REVIEW_TIER_FILLS[tier.outcome === "correct" ? "correct" : "wrong"][step];
 }
 
 function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, inScope: boolean): string {
-  if (isCurrent) {
-    // The question currently on screen — a warm yellow so it reads as "you
-    // are here" and doesn't get lost among already-answered countries.
-    // current-pulse gives it a slow idle brightness breathe so it stays
-    // easy to spot without demanding attention the way a flashing element
-    // would.
-    return "fill-cat-yellow stroke-paper-card dark:fill-cat-yellow-dark dark:stroke-paper-card-dark current-pulse";
-  }
+  if (isCurrent) return CURRENT_FILL_CLASS;
   if (isWrong) {
     // Answered incorrectly and not yet redeemed — full-strength (not faded
     // like "done") so it stands out as something to come back to. Red in
@@ -183,9 +188,7 @@ function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, i
     // settled/lower-priority next to whatever's still being asked about.
     return "fill-cat-blue/65 stroke-paper-card dark:fill-cat-blue-dark/65 dark:stroke-paper-card-dark";
   }
-  return inScope
-    ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
-    : "fill-black/2 stroke-border/30 dark:fill-white/4 dark:stroke-border-dark/30";
+  return notAskedFillClass(inScope);
 }
 
 type Bounds = [number, number, number, number]; // x0, y0, x1, y1
@@ -310,12 +313,15 @@ export function WorldMap({
    * rendered in its own "needs another look" color, checked before
    * filledCcn3s so a country can't be both. */
   wrongCcn3s?: Set<string>;
-  /** Summary-screen "how hard was this one this session" tint, keyed by
-   * ccn3 — absent = not asked (the scale's neutral midpoint); otherwise the
-   * eventual outcome plus how many tries it took, which sets how far along
-   * the green (correct) or red (wrong) side of the scale it lands. When
-   * present, this completely replaces the current/wrong/filled coloring for
-   * every feature (a play session and a review map are never shown at once). */
+  /** "How hard was this one this session" tint, keyed by ccn3 — absent = not
+   * asked (the scale's neutral midpoint); otherwise the eventual outcome
+   * plus how many tries it took, which sets how far along the green
+   * (correct) or red (wrong) side of the scale it lands. Used by every
+   * mode's post-session summary map, and live by One Stop's own map while
+   * playing (paired with currentCcn3, which still wins for whichever
+   * country's on screen right now). When present, this replaces the
+   * filledCcn3s/wrongCcn3s coloring for every feature — a screen picks one
+   * scheme or the other, never both at once. */
   reviewTierByCcn3?: Map<string, ReviewTier>;
   /** Restrict the projection's fit to just these countries (e.g. the active
    * region selection) so a small selection zooms in rather than rendering at
@@ -612,7 +618,7 @@ export function WorldMap({
           vectorEffect="non-scaling-stroke"
           className={
             (reviewTierByCcn3
-              ? reviewFillClassFor(reviewTierByCcn3.get(f.id), inScope)
+              ? reviewFillClassFor(currentCcn3 !== undefined && f.id === currentCcn3, reviewTierByCcn3.get(f.id), inScope)
               : fillClassFor(
                   currentCcn3 !== undefined && f.id === currentCcn3,
                   !!wrongCcn3s?.has(f.id),
@@ -648,7 +654,7 @@ export function WorldMap({
                 vectorEffect="non-scaling-stroke"
                 className={
                   (reviewTierByCcn3
-                    ? reviewFillClassFor(reviewTierByCcn3.get(id), inScope)
+                    ? reviewFillClassFor(currentCcn3 !== undefined && id === currentCcn3, reviewTierByCcn3.get(id), inScope)
                     : fillClassFor(
                         currentCcn3 !== undefined && id === currentCcn3,
                         !!wrongCcn3s?.has(id),
@@ -726,9 +732,11 @@ export function WorldMap({
   // built.bounds (already computed for the auto-zoom inset above) rather
   // than measuring the shape again. Radius is clamped so a huge current
   // country doesn't balloon into a ring bigger than the map — this is a
-  // locator, not an attempt to trace the actual outline.
-  const currentRingBounds =
-    currentCcn3 !== undefined && !reviewTierByCcn3 ? built?.bounds.get(currentCcn3) : undefined;
+  // locator, not an attempt to trace the actual outline. Works the same
+  // whether currentCcn3 arrives alongside reviewTierByCcn3 (One Stop live)
+  // or filledCcn3s/wrongCcn3s (the other two play screens) — the review
+  // summary map never passes currentCcn3 at all, so this is a no-op there.
+  const currentRingBounds = currentCcn3 !== undefined ? built?.bounds.get(currentCcn3) : undefined;
   const currentRingCenterX = currentRingBounds ? (currentRingBounds[0] + currentRingBounds[2]) / 2 : 0;
   const currentRingCenterY = currentRingBounds ? (currentRingBounds[1] + currentRingBounds[3]) / 2 : 0;
   const currentRingSize = currentRingBounds

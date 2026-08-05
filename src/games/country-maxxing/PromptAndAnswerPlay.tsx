@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
@@ -29,6 +29,7 @@ import {
   promptFor,
   questionKey,
   requeueAfterMiss,
+  tierByCcn3,
   type DirectionSetting,
   type Question,
   type SessionType,
@@ -93,14 +94,6 @@ export function PromptAndAnswerPlay({
   const { shaking, trigger: triggerShake } = useShake();
   const sessionTally = useSessionTally();
   const directionTally = useCategoryTally();
-  // Countries already answered correctly — kept highlighted (with a capital
-  // dot) after moving on, instead of only ever showing the current one, so
-  // the map reads as a running progress trail.
-  const [completedCcn3s, setCompletedCcn3s] = useState<Set<string>>(new Set());
-  // Answered incorrectly and not yet redeemed by a later correct answer —
-  // its own color, separate from "done." Getting it right on a requeued
-  // attempt (Learn mode) moves it into completedCcn3s and out of here.
-  const [wrongCcn3s, setWrongCcn3s] = useState<Set<string>>(new Set());
 
   // On iOS Safari, 100dvh doesn't shrink for the on-screen keyboard, so a
   // bottom-anchored input can end up hidden behind it — this tracks the real
@@ -129,6 +122,14 @@ export function PromptAndAnswerPlay({
     new Set(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => c.ccn3)),
   ).current;
   const countryByCcn3 = useRef(new Map(pool.map((c) => [c.ccn3, c] as const))).current;
+  // Derived straight off sessionTally rather than mirrored into its own
+  // state — replaces the old completedCcn3s/wrongCcn3s state, which just
+  // duplicated bookkeeping sessionTally already has. sessionTally's own
+  // identity only changes when an attempt is actually recorded (see its
+  // useMemo), so this only recomputes then too — WorldMap's own map-
+  // building memo keys off this object's identity, and recomputing it on
+  // every render (e.g. every keystroke) would defeat that memoization.
+  const currentTierByCcn3 = useMemo(() => tierByCcn3(pool, sessionTally.getItems()), [pool, sessionTally]);
 
   const current = queue[0] ?? null;
   const currentKey = current ? questionKey(current) : null;
@@ -204,24 +205,12 @@ export function PromptAndAnswerPlay({
     const requeue = sessionType === "learn" && needsReview;
     const rest = queue.slice(1);
     const nextQueue = requeue ? requeueAfterMiss(rest, current) : rest;
-    const ccn3 = current.country.ccn3;
 
     setSkippedKeys((prev) => {
       const next = new Set(prev);
       next.delete(key);
       return next;
     });
-    if (needsReview) {
-      setWrongCcn3s((prev) => new Set(prev).add(ccn3));
-    } else {
-      setCompletedCcn3s((prev) => new Set(prev).add(ccn3));
-      setWrongCcn3s((prev) => {
-        if (!prev.has(ccn3)) return prev;
-        const next = new Set(prev);
-        next.delete(ccn3);
-        return next;
-      });
-    }
     setQueue(nextQueue);
     setInput("");
     setFeedback("idle");
@@ -302,7 +291,7 @@ export function PromptAndAnswerPlay({
   // answered, as a confirming reveal.
   const safeToReveal = feedback !== "idle" || current.direction === "country-to-capital";
   const currentCcn3 = safeToReveal ? current.country.ccn3 : undefined;
-  const dotCcn3s = new Set([...completedCcn3s, ...wrongCcn3s, ...(currentCcn3 ? [currentCcn3] : [])]);
+  const dotCcn3s = new Set([...currentTierByCcn3.keys(), ...(currentCcn3 ? [currentCcn3] : [])]);
   const capitalDots = new Map(
     Array.from(dotCcn3s, (ccn3) => countryByCcn3.get(ccn3)).flatMap((c) =>
       c ? [[c.ccn3, c.capitalLatLng] as const] : [],
@@ -316,9 +305,9 @@ export function PromptAndAnswerPlay({
     // header's height again, same as it used to.
     <div className="relative h-dvh animate-[swoop-in_0.5s_ease-out] bg-paper dark:bg-paper-dark">
       <WorldMap
-        filledCcn3s={completedCcn3s}
+        filledCcn3s={new Set()}
         currentCcn3={currentCcn3}
-        wrongCcn3s={wrongCcn3s}
+        reviewTierByCcn3={currentTierByCcn3}
         focusCcn3s={poolCcn3s}
         capitalDots={capitalDots}
         pointCountries={pointCountries}

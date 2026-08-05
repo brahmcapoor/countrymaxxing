@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import type { Country } from "../../data/countries";
-import { REVIEW_TIER_MAX_TRIES, WorldMap, type ReviewTier } from "../../components/WorldMap";
+import { REVIEW_TIER_MAX_TRIES, WorldMap } from "../../components/WorldMap";
 import { MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import type { TalliedItem } from "../../core/sessionTally";
+import { tierByCcn3 } from "./engine";
 
 // Top-to-bottom, matching WorldMap.tsx's REVIEW_TIER_FILLS step-for-step —
 // a real legend of the exact classes the map renders (4 green steps, gray,
@@ -52,25 +53,10 @@ export function ReviewMap({ pool, sessionTally }: { pool: Country[]; sessionTall
       new Map(pool.filter((c) => MAP_HARD_TO_RENDER.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
     [pool],
   );
-  const reviewTierByCcn3 = useMemo(() => {
-    const ccn3ByCca3 = new Map(pool.map((c) => [c.cca3, c.ccn3] as const));
-    const tiers = new Map<string, ReviewTier>();
-    for (const item of sessionTally) {
-      const ccn3 = ccn3ByCca3.get(item.cca3);
-      if (!ccn3) continue;
-      // The last attempt is the eventual outcome — Learn mode requeues a
-      // miss until it's answered right, so by the time a session completes
-      // naturally, every item's final attempt reflects where it landed
-      // (Quiz mode never requeues, so its one attempt is already final).
-      const finalCorrect = item.attempts[item.attempts.length - 1] === true;
-      // A give-up forces the scale's far end regardless of the raw attempt
-      // count — giving up is a stronger "this one was hard" signal than a
-      // single wrong guess, same weight the old fixed tier-3 gave it.
-      const tries = item.gaveUp ? REVIEW_TIER_MAX_TRIES : item.attempts.length;
-      tiers.set(ccn3, { outcome: finalCorrect ? "correct" : "wrong", tries });
-    }
-    return tiers;
-  }, [pool, sessionTally]);
+  // Same computation One Stop uses live while playing (see engine.ts's
+  // tierByCcn3) — one implementation of "session history becomes a color,"
+  // just called once here instead of every render.
+  const reviewTierByCcn3 = useMemo(() => tierByCcn3(pool, sessionTally), [pool, sessionTally]);
   // Hovering any country (asked or not) shows its capital — this map has no
   // "spoiler" concern the way a live question does, the session is over.
   const labelsByCcn3 = useMemo(() => new Map(pool.map((c) => [c.ccn3, `${c.name} — ${c.capital}`] as const)), [pool]);
