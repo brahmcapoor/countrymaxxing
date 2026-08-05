@@ -163,17 +163,24 @@ export function PromptAndAnswerPlay({
 
   function submitAnswer(answer: string, isGiveUp = false) {
     if (!current) return;
-    const correct = isCloseMatch(answer, matchCandidates(current));
+    const rawCorrect = isCloseMatch(answer, matchCandidates(current));
+    // Typing the right answer after seeing the hint still shows the
+    // checkmark (they did produce it), but it doesn't count as truly known —
+    // same bookkeeping as a miss (not recorded correct, flagged for review,
+    // and — see advance() below — requeued in Learn mode) so it comes back
+    // around for a clean attempt later.
+    const hintAssisted = rawCorrect && hintRevealed;
+    const correct = rawCorrect && !hintRevealed;
     recordAttempt(NAMESPACE, questionKey(current), correct);
     sessionTally.record(
       { cca3: current.country.cca3, label: current.country.name, flag: current.country.flag },
       correct,
-      isGiveUp,
+      isGiveUp || hintAssisted,
     );
     directionTally.record(current.direction, correct);
-    if (correct) {
+    if (rawCorrect) {
       playCorrect();
-      setCombo((c) => c + 1);
+      setCombo((c) => (hintAssisted ? 0 : c + 1));
     } else {
       playIncorrect();
       setCombo(0);
@@ -183,7 +190,7 @@ export function PromptAndAnswerPlay({
     }
     setGaveUp(isGiveUp);
     setRetyped(false);
-    setFeedback(correct ? "correct" : "incorrect");
+    setFeedback(rawCorrect ? "correct" : "incorrect");
     setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
   }
 
@@ -191,7 +198,10 @@ export function PromptAndAnswerPlay({
     if (!current) return;
     const key = questionKey(current);
     const wasIncorrect = feedback === "incorrect";
-    const requeue = sessionType === "learn" && wasIncorrect;
+    // A hint-assisted correct needs to come back around too, same as a miss
+    // — see the comment in submitAnswer above.
+    const needsReview = wasIncorrect || (feedback === "correct" && hintRevealed);
+    const requeue = sessionType === "learn" && needsReview;
     const rest = queue.slice(1);
     const nextQueue = requeue ? requeueAfterMiss(rest, current) : rest;
     const ccn3 = current.country.ccn3;
@@ -201,7 +211,7 @@ export function PromptAndAnswerPlay({
       next.delete(key);
       return next;
     });
-    if (wasIncorrect) {
+    if (needsReview) {
       setWrongCcn3s((prev) => new Set(prev).add(ccn3));
     } else {
       setCompletedCcn3s((prev) => new Set(prev).add(ccn3));
@@ -464,6 +474,7 @@ export function PromptAndAnswerPlay({
                 {(feedback === "idle" || awaitingRetype) && (
                   <button
                     type="submit"
+                    title="Submit answer"
                     aria-label="Submit answer"
                     className={`absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow-md transition-transform hover:scale-105 ${accentSolidClass(ACCENT)}`}
                   >
