@@ -785,22 +785,58 @@ export function WorldMap({
       setAutoZoomAnchor(null);
       return;
     }
+    const svg = svgRef.current;
+    const container = scrollContainerRef.current;
+    if (!svg || !container) return;
     function updateAnchor() {
-      const svg = svgRef.current;
-      const ctm = svg?.getScreenCTM();
-      if (!svg || !ctm) return;
+      if (!svg || !container) return;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
       const pt = svg.createSVGPoint();
       pt.x = autoZoomCenterX;
       pt.y = autoZoomCenterY;
       const screenPt = pt.matrixTransform(ctm);
-      setAutoZoomAnchor({ x: screenPt.x, y: screenPt.y });
+
+      // Once a manual zoom/pan has pushed the country outside the visible
+      // map area, an inset "pointing at" it is worse than no inset: the
+      // anchor dot is off-screen, so the bubble gets clamped back into a
+      // corner and its two leader lines run off the edge toward a spot the
+      // player can't see — which reads as a detached panel floating over an
+      // unrelated part of the world. Dropping the anchor entirely hides the
+      // whole inset until the country is back in view.
+      const view = container.getBoundingClientRect();
+      const inView =
+        screenPt.x >= view.left &&
+        screenPt.x <= view.right &&
+        screenPt.y >= view.top &&
+        screenPt.y <= view.bottom;
+
+      // Bail out of redundant state updates (same position, or still
+      // hidden) — this runs on every frame of a pinch and of a momentum
+      // glide, and a fresh object each time would re-render for nothing.
+      setAutoZoomAnchor((prev) => {
+        if (!inView) return prev === null ? prev : null;
+        if (prev && Math.abs(prev.x - screenPt.x) < 0.5 && Math.abs(prev.y - screenPt.y) < 0.5) return prev;
+        return { x: screenPt.x, y: screenPt.y };
+      });
     }
     updateAnchor();
     window.addEventListener("resize", updateAnchor);
     window.addEventListener("scroll", updateAnchor, true);
+    // The svg's own box can change size/position without the window ever
+    // resizing — the play screens animate its height (`transition-[height]`)
+    // when the mobile keyboard opens, and any surrounding layout shift moves
+    // it too. Neither fires `resize` or `scroll`, and neither touches
+    // `transform`, so nothing else here would notice the CTM had changed and
+    // the anchor would keep using the old geometry. Observing the elements
+    // directly covers every such case, animated frames included.
+    const observer = new ResizeObserver(updateAnchor);
+    observer.observe(svg);
+    observer.observe(container);
     return () => {
       window.removeEventListener("resize", updateAnchor);
       window.removeEventListener("scroll", updateAnchor, true);
+      observer.disconnect();
     };
   }, [showAutoZoom, autoZoomCenterX, autoZoomCenterY, transform]);
 
