@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { geoBounds, geoCentroid, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import { randomLoadingMessage } from "../data/loadingMessages";
@@ -51,6 +58,11 @@ const POINT_COUNTRY_RADIUS = 3.5; // marker radius for countries with no polygon
 // region-filtered view (e.g. "Americas" only) doesn't crop Canada or the US
 // out of frame the way a too-tight 50° cutoff did.
 const OUTLIER_SPAN_DEGREES = 130;
+
+// Pinch/wheel zoom range and the scale a double-tap/double-click jumps to.
+const MIN_SCALE = 1;
+const MAX_SCALE = 4;
+const DOUBLE_TAP_SCALE = 2.5;
 
 // Circular mean of each feature's centroid longitude. A plain min/max bounds
 // check breaks on features that cross the antimeridian (e.g. Fiji spans
@@ -135,6 +147,99 @@ function mergeBounds(a: Bounds, b: Bounds): Bounds {
   return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
 }
 
+// Pinch-to-zoom / pan state, applied to the map svg as a CSS
+// `translate(x, y) scale(s)` (transform-origin 0 0). getScreenCTM already
+// folds CSS transforms in, so hover/hit-testing and the auto-zoom anchor
+// (both CTM-based) keep working unmodified at any scale/pan.
+interface MapTransform {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+const IDENTITY_TRANSFORM: MapTransform = { scale: 1, x: 0, y: 0 };
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), hi);
+}
+
+function pointerDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function pointerMidpoint(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+// Layout info for the pannable svg, captured once at the start of a
+// gesture (or freshly for a one-shot action like double-click) and reused
+// for its whole duration — it reflects layout, not the live transform, and
+// re-measuring mid-gesture would read a DOM rect that hasn't visually
+// caught up with rapid successive transform updates yet.
+interface MapLayoutInfo {
+  basePosX: number; // screen position the untransformed content's (0,0) sits at
+  basePosY: number;
+  naturalWidth: number; // content size before any scale is applied
+  naturalHeight: number;
+  viewRect: DOMRect; // the clipping viewport's screen rect
+}
+
+function measureLayout(svg: SVGSVGElement, container: HTMLElement, current: MapTransform): MapLayoutInfo {
+  const rect = svg.getBoundingClientRect();
+  return {
+    basePosX: rect.left - current.x,
+    basePosY: rect.top - current.y,
+    naturalWidth: rect.width / current.scale,
+    naturalHeight: rect.height / current.scale,
+    viewRect: container.getBoundingClientRect(),
+  };
+}
+
+// Keeps the content point under (anchorX, anchorY) fixed under
+// (targetX, targetY) as scale changes to nextScale — shared by pinch
+// (anchor = gesture-start midpoint, target = the live midpoint) and
+// wheel-zoom (anchor === target === cursor, which doesn't move within a
+// single tick).
+function zoomTowards(
+  layout: MapLayoutInfo,
+  current: MapTransform,
+  anchorX: number,
+  anchorY: number,
+  targetX: number,
+  targetY: number,
+  nextScale: number,
+): MapTransform {
+  const u = (anchorX - layout.basePosX - current.x) / current.scale;
+  const v = (anchorY - layout.basePosY - current.y) / current.scale;
+  return {
+    scale: nextScale,
+    x: targetX - layout.basePosX - u * nextScale,
+    y: targetY - layout.basePosY - v * nextScale,
+  };
+}
+
+// Keeps the scaled content covering the viewport (no empty gap at an edge)
+// by clamping pan, centering it on any axis where it's now smaller than
+// the viewport instead.
+function clampTransform(layout: MapLayoutInfo, candidate: MapTransform): MapTransform {
+  const scale = clampNum(candidate.scale, MIN_SCALE, MAX_SCALE);
+  const scaledW = layout.naturalWidth * scale;
+  const scaledH = layout.naturalHeight * scale;
+  const { viewRect, basePosX, basePosY } = layout;
+
+  const x =
+    scaledW <= viewRect.width
+      ? viewRect.left - basePosX + (viewRect.width - scaledW) / 2
+      : clampNum(candidate.x, viewRect.right - scaledW - basePosX, viewRect.left - basePosX);
+
+  const y =
+    scaledH <= viewRect.height
+      ? viewRect.top - basePosY + (viewRect.height - scaledH) / 2
+      : clampNum(candidate.y, viewRect.bottom - scaledH - basePosY, viewRect.top - basePosY);
+
+  return { scale, x, y };
+}
+
 export function WorldMap({
   filledCcn3s,
   currentCcn3,
@@ -215,6 +320,29 @@ export function WorldMap({
   const rafRef = useRef<number | null>(null);
   const prevFilledRef = useRef<Set<string>>(new Set());
 
+  // Pinch-to-zoom / drag-to-pan. transformRef mirrors the state synchronously
+  // (updated in the same call as setTransform) so gesture handlers always see
+  // the live value even mid-gesture, before React has committed a re-render —
+  // reading `transform` (state) directly from a handler risks a stale value
+  // across rapid successive pointermove events.
+  const [transform, setTransform] = useState<MapTransform>(IDENTITY_TRANSFORM);
+  const transformRef = useRef<MapTransform>(IDENTITY_TRANSFORM);
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartRef = useRef<{
+    transform: MapTransform;
+    layout: MapLayoutInfo;
+    distance: number;
+    mid: { x: number; y: number };
+  } | null>(null);
+  const panStartRef = useRef<{ transform: MapTransform; layout: MapLayoutInfo; client: { x: number; y: number } } | null>(
+    null,
+  );
+
+  function applyTransform(next: MapTransform) {
+    transformRef.current = next;
+    setTransform(next);
+  }
+
   useEffect(() => {
     let cancelled = false;
     loadFeatures().then((f) => {
@@ -278,6 +406,50 @@ export function WorldMap({
     );
     return { projection, path: geoPath(projection) };
   }, [features, focusCcn3s]);
+
+  // A new fit (initial load, or a region-filter change) re-projects the
+  // whole map — any manual zoom/pan from before is now pointed at the wrong
+  // area, so reset it. Not triggered by answer-progress changes (filled/
+  // current/wrong sets) since `projected` doesn't depend on those.
+  useEffect(() => {
+    applyTransform(IDENTITY_TRANSFORM);
+  }, [projected]);
+
+  // Ctrl+wheel (explicit, or how browsers report a trackpad pinch gesture)
+  // zooms the map instead of the page — React's onWheel is passive by
+  // default, so preventDefault there silently no-ops; a manually attached
+  // listener with passive:false is required to actually stop page zoom.
+  useEffect(() => {
+    const svg = svgRef.current;
+    const container = scrollContainerRef.current;
+    if (!svg || !container) return;
+    function handleWheelNative(e: WheelEvent) {
+      if (!svg || !container) return;
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const layout = measureLayout(svg, container, transformRef.current);
+        const factor = Math.exp(-e.deltaY * 0.01);
+        const nextScale = clampNum(transformRef.current.scale * factor, MIN_SCALE, MAX_SCALE);
+        const zoomed = zoomTowards(layout, transformRef.current, e.clientX, e.clientY, e.clientX, e.clientY, nextScale);
+        applyTransform(clampTransform(layout, zoomed));
+        return;
+      }
+      if (transformRef.current.scale > 1) {
+        // Two-finger trackpad scroll pans the zoomed-in map rather than the
+        // (non-scrolling, h-dvh) page.
+        e.preventDefault();
+        const layout = measureLayout(svg, container, transformRef.current);
+        const next: MapTransform = {
+          scale: transformRef.current.scale,
+          x: transformRef.current.x - e.deltaX,
+          y: transformRef.current.y - e.deltaY,
+        };
+        applyTransform(clampTransform(layout, next));
+      }
+    }
+    svg.addEventListener("wheel", handleWheelNative, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheelNative);
+  }, [projected]);
 
   const built = useMemo(() => {
     if (!features || !projected) return null;
@@ -533,18 +705,147 @@ export function WorldMap({
 
   const hoveredLabel = hover?.hoveredId ? labelsByCcn3?.get(hover.hoveredId) : undefined;
 
+  // Ends tracking for one pointer. If a pinch (2 fingers) drops to 1, hands
+  // off to a pan using the remaining finger instead of just stopping —
+  // lifting the first finger of a pinch shouldn't abruptly end the gesture.
+  function endGesture(pointerId: number) {
+    pointersRef.current.delete(pointerId);
+    const svg = svgRef.current;
+    const container = scrollContainerRef.current;
+    if (pointersRef.current.size < 2) pinchStartRef.current = null;
+    if (pointersRef.current.size === 1 && transformRef.current.scale > 1 && svg && container) {
+      const remaining = Array.from(pointersRef.current.values())[0];
+      panStartRef.current = {
+        transform: transformRef.current,
+        layout: measureLayout(svg, container, transformRef.current),
+        client: remaining,
+      };
+    } else {
+      panStartRef.current = null;
+    }
+  }
+
+  function handleGesturePointerDown(e: ReactPointerEvent<SVGSVGElement>) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // Capture is best-effort — keeps move/up events flowing here even if the
+    // pointer strays outside the element mid-gesture, but its absence
+    // shouldn't abort tracking (older browsers / non-standard pointer ids
+    // can reject it).
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore — see comment above
+    }
+    const svg = svgRef.current;
+    const container = scrollContainerRef.current;
+    if (!svg || !container) return;
+
+    if (pointersRef.current.size === 2) {
+      const pts = Array.from(pointersRef.current.values());
+      pinchStartRef.current = {
+        transform: transformRef.current,
+        layout: measureLayout(svg, container, transformRef.current),
+        distance: pointerDistance(pts[0], pts[1]),
+        mid: pointerMidpoint(pts[0], pts[1]),
+      };
+      panStartRef.current = null;
+    } else if (pointersRef.current.size === 1 && transformRef.current.scale > 1) {
+      panStartRef.current = {
+        transform: transformRef.current,
+        layout: measureLayout(svg, container, transformRef.current),
+        client: { x: e.clientX, y: e.clientY },
+      };
+    }
+  }
+
+  function handleGesturePointerMove(e: ReactPointerEvent<SVGSVGElement>) {
+    if (!pointersRef.current.has(e.pointerId)) {
+      updateHover(e);
+      return;
+    }
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    const pinch = pinchStartRef.current;
+    if (pinch && pointersRef.current.size >= 2) {
+      const pts = Array.from(pointersRef.current.values()).slice(0, 2);
+      const dist = pointerDistance(pts[0], pts[1]);
+      const mid = pointerMidpoint(pts[0], pts[1]);
+      const nextScale = clampNum(pinch.transform.scale * (dist / pinch.distance), MIN_SCALE, MAX_SCALE);
+      const zoomed = zoomTowards(pinch.layout, pinch.transform, pinch.mid.x, pinch.mid.y, mid.x, mid.y, nextScale);
+      applyTransform(clampTransform(pinch.layout, zoomed));
+      return;
+    }
+
+    const pan = panStartRef.current;
+    if (pan && pointersRef.current.size === 1) {
+      const next: MapTransform = {
+        scale: pan.transform.scale,
+        x: pan.transform.x + (e.clientX - pan.client.x),
+        y: pan.transform.y + (e.clientY - pan.client.y),
+      };
+      applyTransform(clampTransform(pan.layout, next));
+      return;
+    }
+
+    updateHover(e);
+  }
+
+  function handleGesturePointerUp(e: ReactPointerEvent<SVGSVGElement>) {
+    endGesture(e.pointerId);
+  }
+
+  // Double-click/double-tap: zoom in centered on the tap point, or reset if
+  // already zoomed — a discoverable alternative to pinch for mouse users and
+  // a quick way out of a zoomed-in state for everyone.
+  function handleDoubleClick(e: ReactMouseEvent<SVGSVGElement>) {
+    const svg = svgRef.current;
+    const container = scrollContainerRef.current;
+    if (!svg || !container) return;
+    const layout = measureLayout(svg, container, transformRef.current);
+    if (transformRef.current.scale > 1.01) {
+      applyTransform(clampTransform(layout, IDENTITY_TRANSFORM));
+    } else {
+      const zoomed = zoomTowards(
+        layout,
+        transformRef.current,
+        e.clientX,
+        e.clientY,
+        e.clientX,
+        e.clientY,
+        DOUBLE_TAP_SCALE,
+      );
+      applyTransform(clampTransform(layout, zoomed));
+    }
+  }
+
   return (
     <div className="relative h-full">
       {/* Only the map itself scrolls (for the portrait/narrow case) — overlays
           below are positioned relative to this stable outer box instead, so
           they don't inherit the inner scroll container's coordinate space. */}
-      <div ref={scrollContainerRef} className="h-full overflow-x-auto">
+      <div
+        ref={scrollContainerRef}
+        className={`h-full ${transform.scale > 1 ? "overflow-hidden" : "overflow-x-auto"}`}
+        // pan-x (not none) at rest so the existing portrait native
+        // horizontal scroll still works untouched; a 2-finger touch isn't
+        // in the allowed action either way, so it still reaches our pinch
+        // handler instead of the browser's own page-zoom. Once the user has
+        // zoomed in, panning needs to move freely in any direction, so
+        // native scroll is switched off in favor of our own drag handling.
+        style={{ touchAction: transform.scale > 1 ? "none" : "pan-x" }}
+      >
         <svg
           ref={svgRef}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className={`bg-paper dark:bg-paper-dark ${magnifierOn ? "cursor-none" : ""} ${className ?? ""}`}
-          onPointerMove={updateHover}
+          style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, transformOrigin: "0 0" }}
+          onPointerDown={handleGesturePointerDown}
+          onPointerMove={handleGesturePointerMove}
+          onPointerUp={handleGesturePointerUp}
+          onPointerCancel={handleGesturePointerUp}
           onPointerLeave={() => setHover(null)}
+          onDoubleClick={handleDoubleClick}
         >
           {built.elements}
           {built.pointElements}
@@ -553,6 +854,20 @@ export function WorldMap({
         </svg>
       </div>
       <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {transform.scale > 1.01 && (
+        <button
+          type="button"
+          onClick={() => applyTransform(IDENTITY_TRANSFORM)}
+          title="Reset zoom"
+          // top-14, mirroring the magnifier button on the opposite side —
+          // see its comment about clearing every play screen's top status
+          // pills row.
+          className="absolute left-2 top-14 rounded-full border border-border bg-paper-card px-2 py-1 text-xs text-ink-soft shadow-sm hover:text-ink dark:border-border-dark dark:bg-paper-card-dark dark:text-ink-soft-dark dark:hover:text-ink-dark"
+        >
+          ↺
+        </button>
+      )}
 
       <button
         type="button"
