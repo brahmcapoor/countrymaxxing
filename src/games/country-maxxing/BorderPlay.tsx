@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { countries, type Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
@@ -432,31 +433,47 @@ export function BorderPlay({
         </div>
       </div>
 
-      {showSkipped ? (
+      {showSkipped || showReview ? (
         <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
-          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
-            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
-            <ul className="space-y-2">
-              {skippedPending.map((q) => (
-                <li key={borderQuestionKey(q)} className="flex items-center justify-between text-sm">
-                  <span className="truncate text-ink-soft dark:text-ink-soft-dark">{borderPromptFor(q)}</span>
-                  <button
-                    onClick={() => jumpTo(q)}
-                    className={`ml-3 shrink-0 rounded px-2 py-1 text-xs text-white ${accentSolidClass(ACCENT)}`}
-                  >
-                    Try now
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : showReview ? (
-        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
-          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
-            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
-            <ReviewItemsList items={reviewItems} />
-          </div>
+          <AnimatePresence mode="wait" initial={false}>
+            {showSkipped ? (
+              <motion.div
+                key="skipped"
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95"
+              >
+                <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
+                <ul className="space-y-2">
+                  {skippedPending.map((q) => (
+                    <li key={borderQuestionKey(q)} className="flex items-center justify-between text-sm">
+                      <span className="truncate text-ink-soft dark:text-ink-soft-dark">{borderPromptFor(q)}</span>
+                      <button
+                        onClick={() => jumpTo(q)}
+                        className={`ml-3 shrink-0 rounded px-2 py-1 text-xs text-white ${accentSolidClass(ACCENT)}`}
+                      >
+                        Try now
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="review"
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95"
+              >
+                <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
+                <ReviewItemsList items={reviewItems} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       ) : (
         <div

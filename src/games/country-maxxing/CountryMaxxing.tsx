@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { regions, type Country } from "../../data/countries";
 import { accentSolidClass, accentTextClass, type CategoricalHue } from "../../core/palette";
 import { Confetti } from "../../components/Confetti";
@@ -57,6 +58,8 @@ const FORMAT_OPTIONS: { id: Format; label: string; hint: string; glyph: string; 
     hue: "violet",
   },
 ];
+
+const PANEL_TRANSITION = { duration: 0.24, ease: [0.22, 1, 0.36, 1] } as const;
 
 interface NameAllResult {
   found: Country[];
@@ -323,7 +326,13 @@ export function CountryMaxxing() {
     const sortedSummaryGroups = Array.from(summaryGroups.entries()).sort(([a], [b]) => a.localeCompare(b));
 
     return (
-      <div className="mx-auto max-w-2xl px-4 text-center">
+      <motion.div
+        key="summary-name-all"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={PANEL_TRANSITION}
+        className="mx-auto max-w-2xl px-4 text-center"
+      >
         <Confetti active={celebrate} />
         <p className="font-serif text-2xl text-ink dark:text-ink-dark">
           {missed.length === 0 ? "Named them all! 🎉" : `${found.length} / ${found.length + missed.length} found`}
@@ -366,7 +375,7 @@ export function CountryMaxxing() {
         >
           Back to settings
         </button>
-      </div>
+      </motion.div>
     );
   }
 
@@ -404,7 +413,13 @@ export function CountryMaxxing() {
     const showRounds = rounds.length > 1;
 
     return (
-      <div className="mx-auto max-w-2xl px-4 text-center">
+      <motion.div
+        key="summary-shared"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={PANEL_TRANSITION}
+        className="mx-auto max-w-2xl px-4 text-center"
+      >
         <Confetti active={celebrate} />
         {sessionType === "learn" ? (
           remainingOnGiveUp && remainingOnGiveUp.length > 0 ? (
@@ -482,7 +497,7 @@ export function CountryMaxxing() {
         >
           Back to settings
         </button>
-      </div>
+      </motion.div>
     );
   }
 
@@ -541,7 +556,13 @@ export function CountryMaxxing() {
   const startDisabled = pool.length === 0;
 
   return (
-    <div className="isolate mx-auto my-8 max-w-xl rounded-[28px] border-[6px] border-double border-ink/20 bg-paper-card px-6 py-12 shadow-2xl dark:border-ink-dark/20 dark:bg-paper-card-dark">
+    <motion.div
+      key="setup"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={PANEL_TRANSITION}
+      className="isolate mx-auto my-8 max-w-xl rounded-[28px] border-[6px] border-double border-ink/20 bg-paper-card px-6 py-12 shadow-2xl dark:border-ink-dark/20 dark:bg-paper-card-dark"
+    >
       <svg
         className="pointer-events-none fixed inset-0 -z-10 opacity-35"
         viewBox="0 0 1000 700"
@@ -665,8 +686,16 @@ export function CountryMaxxing() {
         </div>
       </div>
 
-      {(format === "prompt-answer" || format === "map-identify" || format === "borders") && (
-        <div className="mt-8">
+      <AnimatePresence mode="wait" initial={false}>
+        {(format === "prompt-answer" || format === "map-identify" || format === "borders") && (
+          <motion.div
+            key="session-type"
+            initial={{ opacity: 0, y: 8, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -8, height: 0 }}
+            transition={PANEL_TRANSITION}
+            className="mt-8 overflow-hidden"
+          >
           <p className="font-label text-xs font-semibold uppercase tracking-[0.16em] text-ink dark:text-ink-dark">
             Session type
           </p>
@@ -693,11 +722,20 @@ export function CountryMaxxing() {
               </button>
             ))}
           </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {format === "prompt-answer" && (
-        <div className="mt-8">
+      <AnimatePresence mode="wait" initial={false}>
+        {format === "prompt-answer" && (
+          <motion.div
+            key="prompt-answer-options"
+            initial={{ opacity: 0, y: 8, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -8, height: 0 }}
+            transition={PANEL_TRANSITION}
+            className="mt-8 overflow-hidden"
+          >
           <p className="font-label text-xs font-semibold uppercase tracking-[0.16em] text-ink dark:text-ink-dark">
             Direction
           </p>
@@ -722,19 +760,37 @@ export function CountryMaxxing() {
               </button>
             ))}
           </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {format === "map-identify" && (
-        <div className="mt-8">
+      <AnimatePresence mode="wait" initial={false}>
+        {format === "map-identify" && (
+          <motion.div
+            key="map-identify-options"
+            initial={{ opacity: 0, y: 8, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -8, height: 0 }}
+            transition={PANEL_TRANSITION}
+            className="mt-8 overflow-hidden"
+          >
           <DeclareCheckbox checked={askCapital} onChange={setAskCapital}>
             Also ask for the capital
           </DeclareCheckbox>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {format === "borders" && (
-        <>
+      <AnimatePresence mode="wait" initial={false}>
+        {format === "borders" && (
+          <motion.div
+            key="border-options"
+            initial={{ opacity: 0, y: 8, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -8, height: 0 }}
+            transition={PANEL_TRANSITION}
+            className="overflow-hidden"
+          >
           <div className="mt-8">
             <p className="font-label text-xs font-semibold uppercase tracking-[0.16em] text-ink dark:text-ink-dark">
               Question type
@@ -769,11 +825,20 @@ export function CountryMaxxing() {
               Show the map
             </DeclareCheckbox>
           </div>
-        </>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {format === "name-all" && (
-        <>
+      <AnimatePresence mode="wait" initial={false}>
+        {format === "name-all" && (
+          <motion.div
+            key="name-all-options"
+            initial={{ opacity: 0, y: 8, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -8, height: 0 }}
+            transition={PANEL_TRANSITION}
+            className="overflow-hidden"
+          >
           <div className="mt-8">
             <p className="font-label text-xs font-semibold uppercase tracking-[0.16em] text-ink dark:text-ink-dark">
               Name the
@@ -838,8 +903,9 @@ export function CountryMaxxing() {
               </div>
             )}
           </div>
-        </>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="mt-8">
         <div className="flex items-center justify-between">
@@ -956,6 +1022,6 @@ export function CountryMaxxing() {
           onComplete={startSession}
         />
       </div>
-    </div>
+    </motion.div>
   );
 }
