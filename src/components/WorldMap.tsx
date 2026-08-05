@@ -64,6 +64,23 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const DOUBLE_TAP_SCALE = 2.5;
 
+// Momentum: how fast a released pan glide decays (exponential, per ms — see
+// startMomentum), and the release-velocity thresholds (px/ms) below which no
+// glide starts, and below which a running one is considered stopped. Release
+// velocity itself is clamped to MAX_FLING_SPEED so a spurious huge delta
+// (e.g. a synthetic/misbehaving pointer event) can't send it flying.
+const MOMENTUM_FRICTION_PER_MS = 0.998;
+const MOMENTUM_MIN_SPEED = 0.05;
+const MOMENTUM_STOP_SPEED = 0.02;
+const MAX_FLING_SPEED = 3;
+
+// Long-press (touch only — mouse already has real hover): how long a still
+// single finger must stay down before it counts as a "peek" rather than the
+// start of a pan, and how far it's allowed to drift in that window before
+// it's treated as a pan/scroll attempt instead.
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_MOVE_TOLERANCE = 10;
+
 // Circular mean of each feature's centroid longitude. A plain min/max bounds
 // check breaks on features that cross the antimeridian (e.g. Fiji spans
 // -180/180), which forces a whole-world fit even for a tightly focused
@@ -337,10 +354,65 @@ export function WorldMap({
   const panStartRef = useRef<{ transform: MapTransform; layout: MapLayoutInfo; client: { x: number; y: number } } | null>(
     null,
   );
+  // Release-velocity tracking for pan momentum, in px/ms — refreshed on
+  // every pan pointermove, read once when the gesture ends.
+  const velocityRef = useRef<{ vx: number; vy: number }>({ vx: 0, vy: 0 });
+  const lastSampleRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const momentumRafRef = useRef<number | null>(null);
+  // Long-press-to-peek (touch only): the pointer being timed, and the timer
+  // itself.
+  const longPressStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
 
   function applyTransform(next: MapTransform) {
     transformRef.current = next;
     setTransform(next);
+  }
+
+  function cancelMomentum() {
+    if (momentumRafRef.current !== null) {
+      cancelAnimationFrame(momentumRafRef.current);
+      momentumRafRef.current = null;
+    }
+  }
+
+  // Glides the pan after a flick, decelerating exponentially and clamping to
+  // bounds every frame — hitting a bound zeroes that axis's velocity (stop at
+  // the wall, no bounce) rather than fighting the clamp indefinitely.
+  function startMomentum(layout: MapLayoutInfo, vx: number, vy: number) {
+    cancelMomentum();
+    const velocity = { x: clampNum(vx, -MAX_FLING_SPEED, MAX_FLING_SPEED), y: clampNum(vy, -MAX_FLING_SPEED, MAX_FLING_SPEED) };
+    let lastT: number | null = null;
+    function step(now: number) {
+      const dt = lastT === null ? 0 : now - lastT;
+      lastT = now;
+      const candidate: MapTransform = {
+        scale: transformRef.current.scale,
+        x: transformRef.current.x + velocity.x * dt,
+        y: transformRef.current.y + velocity.y * dt,
+      };
+      const clamped = clampTransform(layout, candidate);
+      applyTransform(clamped);
+      if (clamped.x !== candidate.x) velocity.x = 0;
+      if (clamped.y !== candidate.y) velocity.y = 0;
+      const decay = Math.pow(MOMENTUM_FRICTION_PER_MS, dt);
+      velocity.x *= decay;
+      velocity.y *= decay;
+      if (Math.hypot(velocity.x, velocity.y) < MOMENTUM_STOP_SPEED) {
+        momentumRafRef.current = null;
+        return;
+      }
+      momentumRafRef.current = requestAnimationFrame(step);
+    }
+    momentumRafRef.current = requestAnimationFrame(step);
+  }
+
+  function clearLongPress() {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressStartRef.current = null;
   }
 
   useEffect(() => {
@@ -365,6 +437,8 @@ export function WorldMap({
   useEffect(
     () => () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (momentumRafRef.current !== null) cancelAnimationFrame(momentumRafRef.current);
+      if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
     },
     [],
   );
@@ -412,6 +486,7 @@ export function WorldMap({
   // area, so reset it. Not triggered by answer-progress changes (filled/
   // current/wrong sets) since `projected` doesn't depend on those.
   useEffect(() => {
+    cancelMomentum();
     applyTransform(IDENTITY_TRANSFORM);
   }, [projected]);
 
@@ -425,6 +500,7 @@ export function WorldMap({
     if (!svg || !container) return;
     function handleWheelNative(e: WheelEvent) {
       if (!svg || !container) return;
+      cancelMomentum();
       if (e.ctrlKey) {
         e.preventDefault();
         const layout = measureLayout(svg, container, transformRef.current);
@@ -687,9 +763,7 @@ export function WorldMap({
     return null;
   }
 
-  function updateHover(e: ReactPointerEvent<SVGSVGElement>) {
-    const clientX = e.clientX;
-    const clientY = e.clientY;
+  function setHoverAt(clientX: number, clientY: number) {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
       const svg = svgRef.current;
@@ -703,16 +777,36 @@ export function WorldMap({
     });
   }
 
+  function updateHover(e: ReactPointerEvent<SVGSVGElement>) {
+    setHoverAt(e.clientX, e.clientY);
+  }
+
   const hoveredLabel = hover?.hoveredId ? labelsByCcn3?.get(hover.hoveredId) : undefined;
 
   // Ends tracking for one pointer. If a pinch (2 fingers) drops to 1, hands
   // off to a pan using the remaining finger instead of just stopping —
   // lifting the first finger of a pinch shouldn't abruptly end the gesture.
+  // If it was the last finger of an active pan and it was still moving,
+  // starts a momentum glide instead of stopping dead.
   function endGesture(pointerId: number) {
     pointersRef.current.delete(pointerId);
+    clearLongPress();
     const svg = svgRef.current;
     const container = scrollContainerRef.current;
     if (pointersRef.current.size < 2) pinchStartRef.current = null;
+
+    if (pointersRef.current.size === 0) {
+      const wasPanning = panStartRef.current !== null;
+      panStartRef.current = null;
+      if (wasPanning && svg && container) {
+        const { vx, vy } = velocityRef.current;
+        if (Math.hypot(vx, vy) > MOMENTUM_MIN_SPEED) {
+          startMomentum(measureLayout(svg, container, transformRef.current), vx, vy);
+        }
+      }
+      return;
+    }
+
     if (pointersRef.current.size === 1 && transformRef.current.scale > 1 && svg && container) {
       const remaining = Array.from(pointersRef.current.values())[0];
       panStartRef.current = {
@@ -720,6 +814,8 @@ export function WorldMap({
         layout: measureLayout(svg, container, transformRef.current),
         client: remaining,
       };
+      lastSampleRef.current = { x: remaining.x, y: remaining.y, t: performance.now() };
+      velocityRef.current = { vx: 0, vy: 0 };
     } else {
       panStartRef.current = null;
     }
@@ -727,6 +823,7 @@ export function WorldMap({
 
   function handleGesturePointerDown(e: ReactPointerEvent<SVGSVGElement>) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    cancelMomentum();
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     // Capture is best-effort — keeps move/up events flowing here even if the
     // pointer strays outside the element mid-gesture, but its absence
@@ -742,6 +839,7 @@ export function WorldMap({
     if (!svg || !container) return;
 
     if (pointersRef.current.size === 2) {
+      clearLongPress();
       const pts = Array.from(pointersRef.current.values());
       pinchStartRef.current = {
         transform: transformRef.current,
@@ -756,6 +854,21 @@ export function WorldMap({
         layout: measureLayout(svg, container, transformRef.current),
         client: { x: e.clientX, y: e.clientY },
       };
+      lastSampleRef.current = { x: e.clientX, y: e.clientY, t: performance.now() };
+      velocityRef.current = { vx: 0, vy: 0 };
+    }
+
+    // Long-press-to-peek: only meaningful for a lone touch — a mouse already
+    // has real hover, and a 2nd finger just turned this into a pinch (which
+    // cleared the timer above).
+    if (e.pointerType === "touch" && pointersRef.current.size === 1) {
+      longPressStartRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+      const pointerId = e.pointerId;
+      longPressTimerRef.current = window.setTimeout(() => {
+        longPressTimerRef.current = null;
+        const pos = pointersRef.current.get(pointerId);
+        if (pos) setHoverAt(pos.x, pos.y);
+      }, LONG_PRESS_MS);
     }
   }
 
@@ -765,6 +878,12 @@ export function WorldMap({
       return;
     }
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    const longPress = longPressStartRef.current;
+    if (longPress && longPress.pointerId === e.pointerId) {
+      const moved = Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y);
+      if (moved > LONG_PRESS_MOVE_TOLERANCE) clearLongPress();
+    }
 
     const pinch = pinchStartRef.current;
     if (pinch && pointersRef.current.size >= 2) {
@@ -785,6 +904,24 @@ export function WorldMap({
         y: pan.transform.y + (e.clientY - pan.client.y),
       };
       applyTransform(clampTransform(pan.layout, next));
+
+      // Light smoothing (not just the raw last-two-samples delta) so one
+      // irregularly-spaced event right before release can't dominate the
+      // fling speed.
+      const now = performance.now();
+      const last = lastSampleRef.current;
+      if (last) {
+        const dt = now - last.t;
+        if (dt > 0) {
+          const instVx = (e.clientX - last.x) / dt;
+          const instVy = (e.clientY - last.y) / dt;
+          velocityRef.current = {
+            vx: velocityRef.current.vx * 0.7 + instVx * 0.3,
+            vy: velocityRef.current.vy * 0.7 + instVy * 0.3,
+          };
+        }
+      }
+      lastSampleRef.current = { x: e.clientX, y: e.clientY, t: now };
       return;
     }
 
@@ -793,6 +930,7 @@ export function WorldMap({
 
   function handleGesturePointerUp(e: ReactPointerEvent<SVGSVGElement>) {
     endGesture(e.pointerId);
+    if (e.pointerType === "touch") setHover(null);
   }
 
   // Double-click/double-tap: zoom in centered on the tap point, or reset if
@@ -802,6 +940,7 @@ export function WorldMap({
     const svg = svgRef.current;
     const container = scrollContainerRef.current;
     if (!svg || !container) return;
+    cancelMomentum();
     const layout = measureLayout(svg, container, transformRef.current);
     if (transformRef.current.scale > 1.01) {
       applyTransform(clampTransform(layout, IDENTITY_TRANSFORM));
@@ -839,7 +978,15 @@ export function WorldMap({
           ref={svgRef}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className={`bg-paper dark:bg-paper-dark ${magnifierOn ? "cursor-none" : ""} ${className ?? ""}`}
-          style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, transformOrigin: "0 0" }}
+          style={{
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+            transformOrigin: "0 0",
+            // A long touch on the map is a deliberate "peek" gesture, not a
+            // request for the OS's own text-selection/callout UI.
+            WebkitTouchCallout: "none",
+            WebkitUserSelect: "none",
+            userSelect: "none",
+          }}
           onPointerDown={handleGesturePointerDown}
           onPointerMove={handleGesturePointerMove}
           onPointerUp={handleGesturePointerUp}
@@ -858,7 +1005,10 @@ export function WorldMap({
       {transform.scale > 1.01 && (
         <button
           type="button"
-          onClick={() => applyTransform(IDENTITY_TRANSFORM)}
+          onClick={() => {
+            cancelMomentum();
+            applyTransform(IDENTITY_TRANSFORM);
+          }}
           title="Reset zoom"
           // top-14, mirroring the magnifier button on the opposite side —
           // see its comment about clearing every play screen's top status
