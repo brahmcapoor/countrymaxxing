@@ -113,24 +113,49 @@ function longitudeSpan(f: CountryFeature): number {
 // Mutually exclusive with the play-mode current/wrong/filled coloring
 // (a country is never rendered in both modes at once), so this is a
 // completely separate palette rather than another branch of fillClassFor.
-function reviewFillClassFor(tier: 0 | 1 | 2 | 3, inScope: boolean): string {
-  switch (tier) {
-    case 3: // 2+ misses, or given up on
-      return "fill-cat-red stroke-paper-card dark:fill-cat-red-dark dark:stroke-paper-card-dark";
-    case 2: // exactly 1 miss — yellow, not orange: orange sits only ~10-15°
-      // of hue away from red (worse in dark mode, ~5°), reading as barely
-      // distinguishable "different shades of red-orange" rather than a
-      // clear step down in severity. Yellow keeps the familiar traffic-
-      // light green/yellow/red progression with real hue separation from
-      // both neighbors.
-      return "fill-cat-yellow stroke-paper-card dark:fill-cat-yellow-dark dark:stroke-paper-card-dark";
-    case 1: // right first try, every time
-      return "fill-cat-green/70 stroke-paper-card dark:fill-cat-green-dark/70 dark:stroke-paper-card-dark";
-    default: // not asked this session
-      return inScope
-        ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
-        : "fill-black/2 stroke-border/30 dark:fill-white/4 dark:stroke-border-dark/30";
+//
+// A diverging scale, not a 3-step traffic light: neutral gray sits in the
+// middle for "not asked this session," and each side ramps in *opacity*
+// (same hue) rather than shifting hue — a hue ramp toward orange was tried
+// first and dropped, since orange sits only ~10-15° from red (worse in dark
+// mode, ~5°) and read as barely distinguishable "shades of red-orange," not
+// a clear scale. Opacity has no such collision and reads unambiguously as
+// "more/less," which is the actual thing being encoded (attempts taken).
+export type ReviewTier = { outcome: "correct" | "wrong"; tries: number };
+
+// Index 0 = 1 try, index 3 = 4+ tries (clamped) — four steps is enough to
+// read as a gradient without the classes becoming illegible. Every class
+// string here is written out in full (not built from a hue/opacity
+// variable) — Tailwind's scanner needs the literal text to generate the
+// CSS, same rule palette.ts's Tailwind class maps follow.
+const REVIEW_TIER_FILLS = {
+  correct: [
+    "fill-cat-green/35 stroke-paper-card dark:fill-cat-green-dark/35 dark:stroke-paper-card-dark",
+    "fill-cat-green/55 stroke-paper-card dark:fill-cat-green-dark/55 dark:stroke-paper-card-dark",
+    "fill-cat-green/75 stroke-paper-card dark:fill-cat-green-dark/75 dark:stroke-paper-card-dark",
+    "fill-cat-green stroke-paper-card dark:fill-cat-green-dark dark:stroke-paper-card-dark",
+  ],
+  wrong: [
+    "fill-cat-red/35 stroke-paper-card dark:fill-cat-red-dark/35 dark:stroke-paper-card-dark",
+    "fill-cat-red/55 stroke-paper-card dark:fill-cat-red-dark/55 dark:stroke-paper-card-dark",
+    "fill-cat-red/75 stroke-paper-card dark:fill-cat-red-dark/75 dark:stroke-paper-card-dark",
+    "fill-cat-red stroke-paper-card dark:fill-cat-red-dark dark:stroke-paper-card-dark",
+  ],
+} as const;
+// Exported so ReviewMap.tsx can clamp/weight tries the same way this file
+// renders them, and build a legend that matches the real steps exactly
+// instead of an idealized continuous gradient that doesn't.
+export const REVIEW_TIER_MAX_TRIES = REVIEW_TIER_FILLS.correct.length;
+
+function reviewFillClassFor(tier: ReviewTier | undefined, inScope: boolean): string {
+  if (!tier) {
+    // Not asked this session — the scale's neutral midpoint.
+    return inScope
+      ? "fill-black/10 stroke-border dark:fill-white/14 dark:stroke-border-dark"
+      : "fill-black/2 stroke-border/30 dark:fill-white/4 dark:stroke-border-dark/30";
   }
+  const step = Math.min(tier.tries, REVIEW_TIER_MAX_TRIES) - 1;
+  return REVIEW_TIER_FILLS[tier.outcome === "correct" ? "correct" : "wrong"][step];
 }
 
 function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, inScope: boolean): string {
@@ -286,11 +311,12 @@ export function WorldMap({
    * filledCcn3s so a country can't be both. */
   wrongCcn3s?: Set<string>;
   /** Summary-screen "how hard was this one this session" tint, keyed by
-   * ccn3 — 0 (or absent) = not asked, 1 = right first try every time, 2 =
-   * missed once, 3 = missed 2+ times or given up on. When present, this
-   * completely replaces the current/wrong/filled coloring for every
-   * feature (a play session and a review map are never shown at once). */
-  reviewTierByCcn3?: Map<string, 0 | 1 | 2 | 3>;
+   * ccn3 — absent = not asked (the scale's neutral midpoint); otherwise the
+   * eventual outcome plus how many tries it took, which sets how far along
+   * the green (correct) or red (wrong) side of the scale it lands. When
+   * present, this completely replaces the current/wrong/filled coloring for
+   * every feature (a play session and a review map are never shown at once). */
+  reviewTierByCcn3?: Map<string, ReviewTier>;
   /** Restrict the projection's fit to just these countries (e.g. the active
    * region selection) so a small selection zooms in rather than rendering at
    * whole-world scale. Also used to fade out countries visible in the fit
@@ -586,7 +612,7 @@ export function WorldMap({
           vectorEffect="non-scaling-stroke"
           className={
             (reviewTierByCcn3
-              ? reviewFillClassFor(reviewTierByCcn3.get(f.id) ?? 0, inScope)
+              ? reviewFillClassFor(reviewTierByCcn3.get(f.id), inScope)
               : fillClassFor(
                   currentCcn3 !== undefined && f.id === currentCcn3,
                   !!wrongCcn3s?.has(f.id),
@@ -622,7 +648,7 @@ export function WorldMap({
                 vectorEffect="non-scaling-stroke"
                 className={
                   (reviewTierByCcn3
-                    ? reviewFillClassFor(reviewTierByCcn3.get(id) ?? 0, inScope)
+                    ? reviewFillClassFor(reviewTierByCcn3.get(id), inScope)
                     : fillClassFor(
                         currentCcn3 !== undefined && id === currentCcn3,
                         !!wrongCcn3s?.has(id),

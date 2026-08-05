@@ -1,13 +1,25 @@
 import { useMemo } from "react";
 import type { Country } from "../../data/countries";
-import { WorldMap } from "../../components/WorldMap";
+import { REVIEW_TIER_MAX_TRIES, WorldMap, type ReviewTier } from "../../components/WorldMap";
 import { MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import type { TalliedItem } from "../../core/sessionTally";
 
-const LEGEND: { tier: 1 | 2 | 3; label: string; swatchClass: string }[] = [
-  { tier: 1, label: "Right first try", swatchClass: "bg-cat-green/70 dark:bg-cat-green-dark/70" },
-  { tier: 2, label: "Missed once", swatchClass: "bg-cat-yellow dark:bg-cat-yellow-dark" },
-  { tier: 3, label: "Missed 2+ / gave up", swatchClass: "bg-cat-red dark:bg-cat-red-dark" },
+// Top-to-bottom, matching WorldMap.tsx's REVIEW_TIER_FILLS step-for-step —
+// a real legend of the exact classes the map renders (4 green steps, gray,
+// 4 red steps), not an idealized continuous gradient that wouldn't match.
+// Written out literally, same reason as WorldMap.tsx's own fill classes:
+// Tailwind's scanner needs the full class text, not a hue/opacity built
+// from a variable.
+const SCALE_SEGMENTS = [
+  "bg-cat-green dark:bg-cat-green-dark",
+  "bg-cat-green/75 dark:bg-cat-green-dark/75",
+  "bg-cat-green/55 dark:bg-cat-green-dark/55",
+  "bg-cat-green/35 dark:bg-cat-green-dark/35",
+  "bg-black/10 dark:bg-white/14",
+  "bg-cat-red/35 dark:bg-cat-red-dark/35",
+  "bg-cat-red/55 dark:bg-cat-red-dark/55",
+  "bg-cat-red/75 dark:bg-cat-red-dark/75",
+  "bg-cat-red dark:bg-cat-red-dark",
 ];
 
 // Session-only difficulty tint — this session's miss count per country,
@@ -29,36 +41,60 @@ export function ReviewMap({ pool, sessionTally }: { pool: Country[]; sessionTall
   );
   const reviewTierByCcn3 = useMemo(() => {
     const ccn3ByCca3 = new Map(pool.map((c) => [c.cca3, c.ccn3] as const));
-    const tiers = new Map<string, 0 | 1 | 2 | 3>();
+    const tiers = new Map<string, ReviewTier>();
     for (const item of sessionTally) {
       const ccn3 = ccn3ByCca3.get(item.cca3);
       if (!ccn3) continue;
-      const misses = item.attempts.filter((a) => !a).length;
-      const tier: 0 | 1 | 2 | 3 = item.gaveUp || misses >= 2 ? 3 : misses === 1 ? 2 : 1;
-      tiers.set(ccn3, tier);
+      // The last attempt is the eventual outcome — Learn mode requeues a
+      // miss until it's answered right, so by the time a session completes
+      // naturally, every item's final attempt reflects where it landed
+      // (Quiz mode never requeues, so its one attempt is already final).
+      const finalCorrect = item.attempts[item.attempts.length - 1] === true;
+      // A give-up forces the scale's far end regardless of the raw attempt
+      // count — giving up is a stronger "this one was hard" signal than a
+      // single wrong guess, same weight the old fixed tier-3 gave it.
+      const tries = item.gaveUp ? REVIEW_TIER_MAX_TRIES : item.attempts.length;
+      tiers.set(ccn3, { outcome: finalCorrect ? "correct" : "wrong", tries });
     }
     return tiers;
   }, [pool, sessionTally]);
+  // Hovering any country (asked or not) shows its capital — this map has no
+  // "spoiler" concern the way a live question does, the session is over.
+  const labelsByCcn3 = useMemo(() => new Map(pool.map((c) => [c.ccn3, `${c.name} — ${c.capital}`] as const)), [pool]);
 
   return (
     <div className="mt-6">
-      <div className="overflow-hidden rounded-md border border-border dark:border-border-dark">
-        <WorldMap
-          filledCcn3s={new Set()}
-          reviewTierByCcn3={reviewTierByCcn3}
-          focusCcn3s={poolCcn3s}
-          pointCountries={pointCountries}
-          className="h-56 w-full"
-        />
-      </div>
-      <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
-        {LEGEND.map((entry) => (
-          <span key={entry.tier} className="flex items-center gap-1.5 text-xs text-ink-soft dark:text-ink-soft-dark">
-            <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${entry.swatchClass}`} />
-            {entry.label}
+      <div className="flex gap-3">
+        <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border dark:border-border-dark">
+          <WorldMap
+            filledCcn3s={new Set()}
+            reviewTierByCcn3={reviewTierByCcn3}
+            labelsByCcn3={labelsByCcn3}
+            focusCcn3s={poolCcn3s}
+            pointCountries={pointCountries}
+            className="h-56 w-full"
+          />
+        </div>
+        {/* The gradient scale, positioned beside the map rather than below it
+            so it reads as an axis for what's on the map, not a caption under
+            it — same idea as a chart's colorbar. */}
+        <div className="flex w-8 shrink-0 flex-col items-center">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-cat-green dark:text-cat-green-dark">
+            Right
           </span>
-        ))}
+          <div className="mt-1 flex w-2.5 flex-1 flex-col overflow-hidden rounded-full">
+            {SCALE_SEGMENTS.map((swatchClass, i) => (
+              <span key={i} className={`flex-1 ${swatchClass}`} />
+            ))}
+          </div>
+          <span className="mt-1 text-[10px] font-medium uppercase tracking-wide text-cat-red dark:text-cat-red-dark">
+            Wrong
+          </span>
+        </div>
       </div>
+      <p className="mt-2 text-center text-xs text-ink-soft dark:text-ink-soft-dark">
+        Darker = more tries · gray = not asked this session · hover a country for its capital
+      </p>
     </div>
   );
 }
