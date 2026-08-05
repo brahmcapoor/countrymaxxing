@@ -21,6 +21,19 @@ const SCALE_SEGMENTS = [
   "bg-cat-red/75 dark:bg-cat-red-dark/75",
   "bg-cat-red dark:bg-cat-red-dark",
 ];
+// Same order as SCALE_SEGMENTS — the try count each segment represents, or
+// null for the gray "not asked" segment, which has no try count at all.
+const SCALE_STEPS: (number | null)[] = [
+  REVIEW_TIER_MAX_TRIES,
+  3,
+  2,
+  1,
+  null,
+  1,
+  2,
+  3,
+  REVIEW_TIER_MAX_TRIES,
+];
 
 // Session-only difficulty tint — this session's miss count per country,
 // not the persistent lifetime stats "weak spot" heuristic in engine.ts.
@@ -61,6 +74,21 @@ export function ReviewMap({ pool, sessionTally }: { pool: Country[]; sessionTall
   // Hovering any country (asked or not) shows its capital — this map has no
   // "spoiler" concern the way a live question does, the session is over.
   const labelsByCcn3 = useMemo(() => new Map(pool.map((c) => [c.ccn3, `${c.name} — ${c.capital}`] as const)), [pool]);
+  // Which (outcome, try count) combinations actually occurred this session —
+  // the scale's number labels only show for these, rather than a fixed
+  // 1/2/3/4+ set regardless of what really happened. Steps are keyed by the
+  // same clamped value used to pick each country's fill class (a give-up
+  // already collapses to REVIEW_TIER_MAX_TRIES there), so a labeled "4+"
+  // always corresponds to something actually shown that color on the map.
+  const presentSteps = useMemo(() => {
+    const correct = new Set<number>();
+    const wrong = new Set<number>();
+    for (const tier of reviewTierByCcn3.values()) {
+      const step = Math.min(tier.tries, REVIEW_TIER_MAX_TRIES);
+      (tier.outcome === "correct" ? correct : wrong).add(step);
+    }
+    return { correct, wrong };
+  }, [reviewTierByCcn3]);
 
   return (
     <div className="mt-6">
@@ -77,15 +105,34 @@ export function ReviewMap({ pool, sessionTally }: { pool: Country[]; sessionTall
         </div>
         {/* The gradient scale, positioned beside the map rather than below it
             so it reads as an axis for what's on the map, not a caption under
-            it — same idea as a chart's colorbar. */}
-        <div className="flex w-8 shrink-0 flex-col items-center">
+            it — same idea as a chart's colorbar. Try-count labels sit beside
+            the bar rather than inside it (too narrow for text) and only
+            appear for steps this session actually produced. */}
+        <div className="flex w-14 shrink-0 flex-col items-center">
           <span className="text-[10px] font-medium uppercase tracking-wide text-cat-green dark:text-cat-green-dark">
             Right
           </span>
-          <div className="mt-1 flex w-2.5 flex-1 flex-col overflow-hidden rounded-full">
-            {SCALE_SEGMENTS.map((swatchClass, i) => (
-              <span key={i} className={`flex-1 ${swatchClass}`} />
-            ))}
+          <div className="relative mt-1 w-2.5 flex-1">
+            <div className="flex h-full w-2.5 flex-col overflow-hidden rounded-full">
+              {SCALE_SEGMENTS.map((swatchClass, i) => (
+                <span key={i} className={`flex-1 ${swatchClass}`} />
+              ))}
+            </div>
+            {SCALE_STEPS.map((step, i) => {
+              if (step === null) return null;
+              const outcome = i < SCALE_SEGMENTS.length / 2 ? "correct" : "wrong";
+              if (!presentSteps[outcome].has(step)) return null;
+              const label = step < REVIEW_TIER_MAX_TRIES ? String(step) : `${REVIEW_TIER_MAX_TRIES}+`;
+              return (
+                <span
+                  key={i}
+                  className="absolute left-4 -translate-y-1/2 text-[10px] tabular-nums text-ink-soft dark:text-ink-soft-dark"
+                  style={{ top: `${((i + 0.5) / SCALE_SEGMENTS.length) * 100}%` }}
+                >
+                  {label}
+                </span>
+              );
+            })}
           </div>
           <span className="mt-1 text-[10px] font-medium uppercase tracking-wide text-cat-red dark:text-cat-red-dark">
             Wrong
