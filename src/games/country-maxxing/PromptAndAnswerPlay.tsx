@@ -20,6 +20,7 @@ import {
   type TalliedItem,
 } from "../../core/sessionTally";
 import { ReviewItemsList } from "./ReviewDrawer";
+import { TierLegend } from "./TierLegend";
 import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
 import {
   buildQueue,
@@ -71,6 +72,11 @@ export function PromptAndAnswerPlay({
   // top-bar toggle pattern as "Skipped," and mutually exclusive with it
   // (see the two onClick handlers below).
   const [showReview, setShowReview] = useState(false);
+  // Same bottom-panel-slot/top-bar-toggle pattern as Skipped and Review,
+  // mutually exclusive with both — explains the map's live gradient tint
+  // (see currentTierByCcn3 below), so it's shown unconditionally rather
+  // than gated on having any data yet, the way Skipped/Review are.
+  const [showLegend, setShowLegend] = useState(false);
   const [input, setInput] = useState("");
   const [feedback, setFeedback] = useState<"idle" | "correct" | "incorrect">("idle");
   const [score, setScore] = useState({ correct: 0, total: 0 });
@@ -331,6 +337,7 @@ export function PromptAndAnswerPlay({
               onClick={() => {
                 setShowSkipped((s) => !s);
                 setShowReview(false);
+                setShowLegend(false);
               }}
               className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
             >
@@ -342,12 +349,25 @@ export function PromptAndAnswerPlay({
               onClick={() => {
                 setShowReview((s) => !s);
                 setShowSkipped(false);
+                setShowLegend(false);
               }}
               className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
             >
               Review ({reviewItems.length})
             </button>
           )}
+          <button
+            onClick={() => {
+              setShowLegend((s) => !s);
+              setShowSkipped(false);
+              setShowReview(false);
+            }}
+            title="What the map colors mean"
+            aria-label="What the map colors mean"
+            className="pointer-events-auto rounded-full bg-paper-card/95 px-3 py-1.5 text-ink-soft shadow-sm backdrop-blur hover:text-ink dark:bg-paper-card-dark/95 dark:text-ink-soft-dark dark:hover:text-ink-dark"
+          >
+            Legend
+          </button>
           {combo >= 2 && (
             <span
               key={comboTier(combo)}
@@ -362,7 +382,7 @@ export function PromptAndAnswerPlay({
         </div>
       </div>
 
-      {showSkipped || showReview ? (
+      {showSkipped || showReview || showLegend ? (
         <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
           <AnimatePresence mode="wait" initial={false}>
             {showSkipped ? (
@@ -389,7 +409,7 @@ export function PromptAndAnswerPlay({
                   ))}
                 </ul>
               </motion.div>
-            ) : (
+            ) : showReview ? (
               <motion.div
                 key="review"
                 initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -400,6 +420,28 @@ export function PromptAndAnswerPlay({
               >
                 <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
                 <ReviewItemsList items={reviewItems} />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="legend"
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95"
+              >
+                <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Map legend</p>
+                {/* h-36 + flex here (not on TierLegend itself) — its internal
+                    flex-1 bar needs a flex-container ancestor with a real
+                    height to stretch into, same as when it sits beside the
+                    map in ReviewMap.tsx (there, the map's own h-56 sibling
+                    does this job implicitly via the row's default stretch). */}
+                <div className="flex h-36 justify-center">
+                  <TierLegend tierByCcn3={currentTierByCcn3} />
+                </div>
+                <p className="mt-3 text-center text-xs text-ink-soft dark:text-ink-soft-dark">
+                  Brighter green = fewer tries · brighter red = more tries so far
+                </p>
               </motion.div>
             )}
           </AnimatePresence>

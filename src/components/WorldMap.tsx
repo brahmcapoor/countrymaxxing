@@ -137,19 +137,32 @@ function notAskedFillClass(inScope: boolean): string {
 // mode, ~5°) and read as barely distinguishable "shades of red-orange," not
 // a clear scale. Opacity has no such collision and reads unambiguously as
 // "more/less," which is the actual thing being encoded (attempts taken).
+//
+// The two sides don't ramp the same direction against tries, on purpose.
+// Wrong: more vivid the more times you've missed it — a repeat miss is more
+// concerning than a single one, so it should draw more attention, the same
+// "notable stuff gets full color, unremarkable stuff fades" logic this
+// codebase already used for "done"/"wrong" before this gradient existed.
+// Correct: more vivid the *fewer* tries it took — a clean first-try win is
+// the strongest positive signal and gets the most emphasis; one that took
+// several tries is still correct, but a quieter, hard-won correct rather
+// than an equally bold one. Both sides are "vividness = how noteworthy this
+// outcome is," just in opposite directions relative to tries.
 export type ReviewTier = { outcome: "correct" | "wrong"; tries: number };
 
-// Index 0 = 1 try, index 3 = 4+ tries (clamped) — four steps is enough to
-// read as a gradient without the classes becoming illegible. Every class
-// string here is written out in full (not built from a hue/opacity
-// variable) — Tailwind's scanner needs the literal text to generate the
-// CSS, same rule palette.ts's Tailwind class maps follow.
+// Index 0 = the most vivid step, index 3 = the faintest — which raw try
+// count lands on which end differs by outcome (see reviewFillClassFor).
+// Four steps is enough to read as a gradient without the classes becoming
+// illegible. Every class string here is written out in full (not built
+// from a hue/opacity variable) — Tailwind's scanner needs the literal
+// text to generate the CSS, same rule palette.ts's Tailwind class maps
+// follow.
 const REVIEW_TIER_FILLS = {
   correct: [
-    "fill-cat-green/35 stroke-paper-card dark:fill-cat-green-dark/35 dark:stroke-paper-card-dark",
-    "fill-cat-green/55 stroke-paper-card dark:fill-cat-green-dark/55 dark:stroke-paper-card-dark",
-    "fill-cat-green/75 stroke-paper-card dark:fill-cat-green-dark/75 dark:stroke-paper-card-dark",
     "fill-cat-green stroke-paper-card dark:fill-cat-green-dark dark:stroke-paper-card-dark",
+    "fill-cat-green/75 stroke-paper-card dark:fill-cat-green-dark/75 dark:stroke-paper-card-dark",
+    "fill-cat-green/55 stroke-paper-card dark:fill-cat-green-dark/55 dark:stroke-paper-card-dark",
+    "fill-cat-green/35 stroke-paper-card dark:fill-cat-green-dark/35 dark:stroke-paper-card-dark",
   ],
   wrong: [
     "fill-cat-red/35 stroke-paper-card dark:fill-cat-red-dark/35 dark:stroke-paper-card-dark",
@@ -166,8 +179,12 @@ export const REVIEW_TIER_MAX_TRIES = REVIEW_TIER_FILLS.correct.length;
 function reviewFillClassFor(isCurrent: boolean, tier: ReviewTier | undefined, inScope: boolean): string {
   if (isCurrent) return CURRENT_FILL_CLASS;
   if (!tier) return notAskedFillClass(inScope); // not asked this session — the scale's neutral midpoint
+  // Same index into both arrays — they just run in opposite directions
+  // (correct: vivid-to-faint; wrong: faint-to-vivid), which is what gives
+  // fewer tries the most emphasis on the correct side and more tries the
+  // most emphasis on the wrong side. See the ReviewTier comment above.
   const step = Math.min(tier.tries, REVIEW_TIER_MAX_TRIES) - 1;
-  return REVIEW_TIER_FILLS[tier.outcome === "correct" ? "correct" : "wrong"][step];
+  return REVIEW_TIER_FILLS[tier.outcome][step];
 }
 
 function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, inScope: boolean): string {
