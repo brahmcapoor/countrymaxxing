@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
@@ -162,17 +163,24 @@ export function PromptAndAnswerPlay({
 
   function submitAnswer(answer: string, isGiveUp = false) {
     if (!current) return;
-    const correct = isCloseMatch(answer, matchCandidates(current));
+    const rawCorrect = isCloseMatch(answer, matchCandidates(current));
+    // Typing the right answer after seeing the hint still shows the
+    // checkmark (they did produce it), but it doesn't count as truly known —
+    // same bookkeeping as a miss (not recorded correct, flagged for review,
+    // and — see advance() below — requeued in Learn mode) so it comes back
+    // around for a clean attempt later.
+    const hintAssisted = rawCorrect && hintRevealed;
+    const correct = rawCorrect && !hintRevealed;
     recordAttempt(NAMESPACE, questionKey(current), correct);
     sessionTally.record(
       { cca3: current.country.cca3, label: current.country.name, flag: current.country.flag },
       correct,
-      isGiveUp,
+      isGiveUp || hintAssisted,
     );
     directionTally.record(current.direction, correct);
-    if (correct) {
+    if (rawCorrect) {
       playCorrect();
-      setCombo((c) => c + 1);
+      setCombo((c) => (hintAssisted ? 0 : c + 1));
     } else {
       playIncorrect();
       setCombo(0);
@@ -182,7 +190,7 @@ export function PromptAndAnswerPlay({
     }
     setGaveUp(isGiveUp);
     setRetyped(false);
-    setFeedback(correct ? "correct" : "incorrect");
+    setFeedback(rawCorrect ? "correct" : "incorrect");
     setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
   }
 
@@ -190,7 +198,10 @@ export function PromptAndAnswerPlay({
     if (!current) return;
     const key = questionKey(current);
     const wasIncorrect = feedback === "incorrect";
-    const requeue = sessionType === "learn" && wasIncorrect;
+    // A hint-assisted correct needs to come back around too, same as a miss
+    // — see the comment in submitAnswer above.
+    const needsReview = wasIncorrect || (feedback === "correct" && hintRevealed);
+    const requeue = sessionType === "learn" && needsReview;
     const rest = queue.slice(1);
     const nextQueue = requeue ? requeueAfterMiss(rest, current) : rest;
     const ccn3 = current.country.ccn3;
@@ -200,7 +211,7 @@ export function PromptAndAnswerPlay({
       next.delete(key);
       return next;
     });
-    if (wasIncorrect) {
+    if (needsReview) {
       setWrongCcn3s((prev) => new Set(prev).add(ccn3));
     } else {
       setCompletedCcn3s((prev) => new Set(prev).add(ccn3));
@@ -362,31 +373,47 @@ export function PromptAndAnswerPlay({
         </div>
       </div>
 
-      {showSkipped ? (
+      {showSkipped || showReview ? (
         <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
-          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
-            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
-            <ul className="space-y-2">
-              {skippedPending.map((q) => (
-                <li key={questionKey(q)} className="flex items-center justify-between text-sm">
-                  <span className="text-ink-soft dark:text-ink-soft-dark">{promptFor(q)}</span>
-                  <button
-                    onClick={() => jumpTo(q)}
-                    className={`ml-3 shrink-0 rounded px-2 py-1 text-xs text-white ${accentSolidClass(ACCENT)}`}
-                  >
-                    Try now
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : showReview ? (
-        <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" style={bottomBarStyle}>
-          <div className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95">
-            <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
-            <ReviewItemsList items={reviewItems} />
-          </div>
+          <AnimatePresence mode="wait" initial={false}>
+            {showSkipped ? (
+              <motion.div
+                key="skipped"
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95"
+              >
+                <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Skipped questions</p>
+                <ul className="space-y-2">
+                  {skippedPending.map((q) => (
+                    <li key={questionKey(q)} className="flex items-center justify-between text-sm">
+                      <span className="text-ink-soft dark:text-ink-soft-dark">{promptFor(q)}</span>
+                      <button
+                        onClick={() => jumpTo(q)}
+                        className={`ml-3 shrink-0 rounded px-2 py-1 text-xs text-white ${accentSolidClass(ACCENT)}`}
+                      >
+                        Try now
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="review"
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full max-w-md rounded-md border border-border bg-paper-card/95 p-4 shadow-lg backdrop-blur dark:border-border-dark dark:bg-paper-card-dark/95"
+              >
+                <p className="mb-3 text-sm font-medium text-ink dark:text-ink-dark">Review so far</p>
+                <ReviewItemsList items={reviewItems} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       ) : (
         <div
@@ -447,6 +474,7 @@ export function PromptAndAnswerPlay({
                 {(feedback === "idle" || awaitingRetype) && (
                   <button
                     type="submit"
+                    title="Submit answer"
                     aria-label="Submit answer"
                     className={`absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow-md transition-transform hover:scale-105 ${accentSolidClass(ACCENT)}`}
                   >

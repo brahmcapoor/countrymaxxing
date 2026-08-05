@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { countries } from "../../data/countries";
 import { missCount, type TalliedItem } from "../../core/sessionTally";
 
@@ -90,11 +91,21 @@ export function ReviewDrawer({ items }: { items: TalliedItem[] }) {
           ⌄
         </span>
       </button>
-      {open && (
-        <div className="mt-2 rounded-md border border-border p-4 dark:border-border-dark">
-          <ReviewItemsList items={items} />
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: -6 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -6 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2 rounded-md border border-border p-4 dark:border-border-dark">
+              <ReviewItemsList items={items} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
