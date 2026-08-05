@@ -1,6 +1,20 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { countries } from "../../data/countries";
 import { missCount, type TalliedItem } from "../../core/sessionTally";
+
+// Keyed off the static dataset, not anything session-specific — every
+// TalliedItem's cca3 is one of these, so a plain lookup map is enough to
+// pull the capital back out for display without threading it through
+// sessionTally itself (that stays generic across all four modes).
+const countryByCca3 = new Map(countries.map((c) => [c.cca3, c]));
+
+function tagsFor(item: TalliedItem): string[] {
+  const misses = missCount(item);
+  return [misses > 0 ? `missed ${misses}×` : null, item.gaveUp ? "gave up" : null].filter(
+    (tag): tag is string => tag !== null,
+  );
+}
 
 // The list + copy button, factored out so both the post-session drawer
 // below and each play screen's mid-session "Review" panel (toggled from
@@ -10,7 +24,13 @@ export function ReviewItemsList({ items }: { items: TalliedItem[] }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   async function copyList() {
-    const text = items.map((item) => item.label).join("\n");
+    const date = new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    const lines = items.map((item) => {
+      const capital = countryByCca3.get(item.cca3)?.capital;
+      const suffix = [capital ? `capital: ${capital}` : null, ...tagsFor(item)].filter(Boolean).join(" · ");
+      return `${item.flag} ${item.label}${suffix ? ` — ${suffix}` : ""}`;
+    });
+    const text = [`CountryMaxxing — Review (${date})`, `${items.length} to review`, "", ...lines].join("\n");
     try {
       await navigator.clipboard.writeText(text);
       setCopyState("copied");
@@ -22,16 +42,21 @@ export function ReviewItemsList({ items }: { items: TalliedItem[] }) {
 
   return (
     <>
-      <ul className="space-y-1.5">
+      <ul className="space-y-2">
         {items.map((item) => {
-          const misses = missCount(item);
-          const tags = [misses > 0 ? `missed ${misses}×` : null, item.gaveUp ? "gave up" : null].filter(Boolean);
+          const capital = countryByCca3.get(item.cca3)?.capital;
+          const tags = tagsFor(item);
           return (
-            <li key={item.cca3} className="flex items-center justify-between gap-3 text-sm">
-              <span className="truncate text-ink dark:text-ink-dark">
-                {item.flag} {item.label}
-              </span>
-              <span className="shrink-0 text-xs text-cat-red dark:text-cat-red-dark">{tags.join(" · ")}</span>
+            <li key={item.cca3} className="text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="truncate text-ink dark:text-ink-dark">
+                  {item.flag} {item.label}
+                </span>
+                <span className="shrink-0 text-xs text-cat-red dark:text-cat-red-dark">{tags.join(" · ")}</span>
+              </div>
+              {capital && (
+                <p className="truncate text-xs text-ink-soft dark:text-ink-soft-dark">Capital: {capital}</p>
+              )}
             </li>
           );
         })}
