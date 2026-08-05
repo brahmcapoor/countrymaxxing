@@ -515,7 +515,6 @@ export function CountryMaxxing() {
         pool={pool}
         directionSetting={directionSetting}
         sessionType={sessionType}
-        letterHints={letterHints}
         onExit={handlePromptAndAnswerExit}
       />
     );
@@ -899,7 +898,7 @@ export function CountryMaxxing() {
         </div>
       )}
 
-      {format !== "name-all" && (
+      {format !== "name-all" && format !== "prompt-answer" && (
         <div className="mt-8">
           <DeclareCheckbox checked={letterHints} onChange={setLetterHints}>
             Letter hints

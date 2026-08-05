@@ -54,13 +54,11 @@ export function PromptAndAnswerPlay({
   pool,
   directionSetting,
   sessionType,
-  letterHints,
   onExit,
 }: {
   pool: Country[];
   directionSetting: DirectionSetting;
   sessionType: SessionType;
-  letterHints: boolean;
   onExit: (result: PromptAndAnswerResult | null) => void;
 }) {
   const [queue, setQueue] = useState<Question[]>(() => buildQueue(pool, directionSetting));
@@ -80,6 +78,11 @@ export function PromptAndAnswerPlay({
   // and missed" copy/shake from "you asked to be shown," which read oddly
   // reusing the same "Not quite" wrong-answer framing.
   const [gaveUp, setGaveUp] = useState(false);
+  // Learn mode only: the hangman-style scaffold isn't shown up front — Give
+  // Up doubles as a two-stage reveal, first press shows the hint (question
+  // mark → flag icon swap), second press shows the full answer. Quiz mode
+  // skips straight to the full reveal on the first press (see giveUp below).
+  const [hintRevealed, setHintRevealed] = useState(false);
   // Reading the correct answer alone barely builds retrieval — the classic
   // gap between recognizing an answer and being able to produce it. Once
   // wrong, advancing is gated on typing the correct answer back once
@@ -213,6 +216,7 @@ export function PromptAndAnswerPlay({
     setFeedback("idle");
     setGaveUp(false);
     setRetyped(false);
+    setHintRevealed(false);
     if (nextQueue.length === 0)
       onExit({ ...score, sessionTally: sessionTally.getItems(), directionBreakdown: directionTally.getBreakdown() });
   }
@@ -225,13 +229,21 @@ export function PromptAndAnswerPlay({
     setQueue([...rest, current]);
     setInput("");
     setFeedback("idle");
+    setHintRevealed(false);
   }
 
-  // Reveals this question's answer and counts it as a miss, then continues
-  // the round via the same path a real wrong guess takes — Skip is for "I
-  // think I can get this later," Give Up is for "just show me."
+  // Learn mode: first press just reveals the hangman-style hint and leaves
+  // the question live (still answerable) — only a second press reveals the
+  // answer outright and counts it as a miss via the same path a real wrong
+  // guess takes. Quiz mode has no hint stage, so it reveals on the first
+  // press. Skip is for "I think I can get this later," Give Up is for "just
+  // show me."
   function giveUp() {
     if (!current || feedback !== "idle") return;
+    if (sessionType === "learn" && !hintRevealed) {
+      setHintRevealed(true);
+      return;
+    }
     submitAnswer("", true);
   }
 
@@ -240,6 +252,7 @@ export function PromptAndAnswerPlay({
     setQueue((q) => [target, ...q.filter((item) => questionKey(item) !== key)]);
     setInput("");
     setFeedback("idle");
+    setHintRevealed(false);
     setShowSkipped(false);
   }
 
@@ -393,7 +406,7 @@ export function PromptAndAnswerPlay({
                 ) : (
                   <div>
                     <p className="font-serif text-xl text-ink dark:text-ink-dark">{promptFor(current)}</p>
-                    {letterHints && feedback === "idle" && (
+                    {hintRevealed && feedback === "idle" && (
                       <p className="mt-1 font-mono text-sm tracking-wide text-ink-soft dark:text-ink-soft-dark">
                         {letterHint(expectedAnswer(current))}
                       </p>
@@ -408,13 +421,13 @@ export function PromptAndAnswerPlay({
                 type="button"
                 onClick={giveUp}
                 disabled={feedback !== "idle"}
-                title="Give up on this one"
-                aria-label="Give up on this one"
+                title={sessionType === "learn" && !hintRevealed ? "Show a hint" : "Give up on this one"}
+                aria-label={sessionType === "learn" && !hintRevealed ? "Show a hint" : "Give up on this one"}
                 className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-paper-card/95 text-cat-red shadow-sm backdrop-blur transition-opacity duration-300 hover:scale-105 dark:bg-paper-card-dark/95 dark:text-cat-red-dark ${
                   feedback === "idle" ? "opacity-100" : "pointer-events-none opacity-40"
                 }`}
               >
-                🏳️
+                {sessionType === "learn" && !hintRevealed ? "❓" : "🏳️"}
               </button>
 
               <div className="relative flex-1">
