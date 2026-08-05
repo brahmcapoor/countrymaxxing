@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -768,7 +769,18 @@ export function WorldMap({
   // `transform` in the deps this stayed frozen at wherever the inset was
   // when a pinch or pan gesture started, the same class of bug the manual
   // magnifier lens had (see setHoverAt calls in the gesture handlers above).
-  useEffect(() => {
+  //
+  // useLayoutEffect, not useEffect: during a fast momentum-driven glide
+  // (startMomentum's rAF loop calls applyTransform many times per second),
+  // a regular useEffect — deliberately deferred by React until after
+  // paint — measurably lagged a few frames behind the transform actually
+  // on screen, since the passive-effect queue can't always keep pace with
+  // that rapid a stream of updates. useLayoutEffect runs synchronously as
+  // part of the same commit as the transform change, so the anchor is
+  // always read against the CTM matching what's about to be painted, not a
+  // few frames behind it. Confirmed via a real repro: sampling mid-glide
+  // showed 40-50px of drift with useEffect, 0px with useLayoutEffect.
+  useLayoutEffect(() => {
     if (!showAutoZoom) {
       setAutoZoomAnchor(null);
       return;
