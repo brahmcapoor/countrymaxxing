@@ -63,6 +63,11 @@ const OUTLIER_SPAN_DEGREES = 130;
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const DOUBLE_TAP_SCALE = 2.5;
+// Past this scale the map itself is already magnified enough that the lens
+// stops being useful — it hides itself (rather than turning the feature off)
+// so it reappears automatically on zooming back out, instead of requiring
+// another tap on the magnifier button.
+const MAGNIFIER_MAX_SCALE = 2;
 
 // Momentum: how fast a released pan glide decays (exponential, per ms — see
 // startMomentum), and the release-velocity thresholds (px/ms) below which no
@@ -799,6 +804,11 @@ export function WorldMap({
   }
 
   const hoveredLabel = hover?.hoveredId ? labelsByCcn3?.get(hover.hoveredId) : undefined;
+  // Whether the lens would actually render right now — magnifierOn is just
+  // the button's toggle state; past MAGNIFIER_MAX_SCALE the lens hides
+  // itself, so anything cosmetic that only makes sense while it's visible
+  // (hiding the cursor, offsetting the hover label) needs this instead.
+  const magnifierVisible = magnifierOn && transform.scale <= MAGNIFIER_MAX_SCALE;
 
   // Ends tracking for one pointer. If a pinch (2 fingers) drops to 1, hands
   // off to a pan using the remaining finger instead of just stopping —
@@ -910,6 +920,10 @@ export function WorldMap({
       const nextScale = clampNum(pinch.transform.scale * (dist / pinch.distance), MIN_SCALE, MAX_SCALE);
       const zoomed = zoomTowards(pinch.layout, pinch.transform, pinch.mid.x, pinch.mid.y, mid.x, mid.y, nextScale);
       applyTransform(clampTransform(pinch.layout, zoomed));
+      // Keeps the magnifier (anchored to `hover`) tracking the pinch instead
+      // of freezing wherever it was when the gesture started — see
+      // MAGNIFIER_MAX_SCALE above for why it stops rendering past a point.
+      setHoverAt(mid.x, mid.y);
       return;
     }
 
@@ -921,6 +935,10 @@ export function WorldMap({
         y: pan.transform.y + (e.clientY - pan.client.y),
       };
       applyTransform(clampTransform(pan.layout, next));
+      // Same reasoning as the pinch branch above — a single-finger drag once
+      // already zoomed in is a pan, not a hover, but the magnifier should
+      // still follow the finger rather than staying put.
+      setHoverAt(e.clientX, e.clientY);
 
       // Light smoothing (not just the raw last-two-samples delta) so one
       // irregularly-spaced event right before release can't dominate the
@@ -994,7 +1012,7 @@ export function WorldMap({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className={`bg-paper dark:bg-paper-dark ${magnifierOn ? "cursor-none" : ""} ${className ?? ""}`}
+          className={`bg-paper dark:bg-paper-dark ${magnifierVisible ? "cursor-none" : ""} ${className ?? ""}`}
           style={{
             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
             transformOrigin: "0 0",
@@ -1146,14 +1164,14 @@ export function WorldMap({
           className="pointer-events-none fixed z-50 -translate-x-1/2 whitespace-nowrap rounded bg-ink px-2 py-1 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark"
           style={{
             left: hover!.clientX,
-            top: hover!.clientY - (magnifierOn ? LENS_SIZE / 2 + 28 : 24),
+            top: hover!.clientY - (magnifierVisible ? LENS_SIZE / 2 + 28 : 24),
           }}
         >
           {hoveredLabel}
         </div>
       )}
 
-      {magnifierOn && hover && (
+      {magnifierVisible && hover && (
         <div
           className="pointer-events-none fixed z-40 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full border-2 border-cat-red shadow-lg dark:border-cat-red-dark"
           style={{
