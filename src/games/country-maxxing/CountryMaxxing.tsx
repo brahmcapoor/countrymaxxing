@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { regions, type Country } from "../../data/countries";
+import { countries, regions, type Country } from "../../data/countries";
 import { accentSolidClass, accentTextClass, type CategoricalHue } from "../../core/palette";
 import { Confetti } from "../../components/Confetti";
 import { DarkModeToggle } from "../../components/DarkModeToggle";
@@ -130,6 +130,12 @@ export function CountryMaxxing() {
 
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [nameAllResult, setNameAllResult] = useState<NameAllResult | null>(null);
+  // Set only by "Learn what I missed" on a Quiz summary — overrides the
+  // region/weak-spot pool below with just the countries that session got
+  // wrong, for one Learn-mode pass. Cleared whenever the player heads back
+  // to the setup screen, so a stale subset never leaks into their next
+  // normal session.
+  const [customPool, setCustomPool] = useState<Country[] | null>(null);
   // Populated only on an early "Give up" in Learn mode — Quiz mode's summary
   // is already just the score, and a natural Learn-mode completion means
   // nothing is left, so this only ever matters for the give-up case.
@@ -161,8 +167,15 @@ export function CountryMaxxing() {
   // "wrong," so a session-completion miss isn't the same signal "focus on
   // weak spots" means for the other two modes. Don't apply it here, even if
   // the checkbox was left checked from a different format.
-  const pool =
-    focusOnWeakSpots && format !== "name-all"
+  const pool = customPool
+    ? // Learn-what-I-missed already ran through borderEligiblePool once
+      // (every item in it was actually asked last session), but reapplying
+      // it here costs nothing and keeps this the single source of truth for
+      // "how many questions this session can contain."
+      format === "borders"
+      ? borderEligiblePool(customPool, borderTypeSetting)
+      : customPool
+    : focusOnWeakSpots && format !== "name-all"
       ? weakPool
       : format === "borders"
         ? // Border mode silently skips countries the current type setting
@@ -241,9 +254,31 @@ export function CountryMaxxing() {
     setPhase("play");
   }
 
+  function backToSetup() {
+    setCustomPool(null);
+    setPhase("setup");
+  }
+
+  // Only reachable from a Quiz summary (the button is gated on
+  // sessionType === "quiz") — takes whatever this session's ReviewDrawer is
+  // showing and starts a fresh Learn-mode pass over just those countries.
+  function learnMissed() {
+    const missedCca3s = new Set(reviewList(sessionTally).map((item) => item.cca3));
+    const missedCountries = countries.filter((c) => missedCca3s.has(c.cca3));
+    if (missedCountries.length === 0) return;
+    playStampThunk();
+    setCustomPool(missedCountries);
+    setSessionType("learn");
+    setScore({ correct: 0, total: 0 });
+    setRemainingOnGiveUp(null);
+    setSessionTally([]);
+    setCategoryBreakdown([]);
+    setPhase("play");
+  }
+
   function handleNameAllExit(result: NameAllResult | null) {
     if (!result) {
-      setPhase("setup");
+      backToSetup();
       return;
     }
     setNameAllResult(result);
@@ -254,7 +289,7 @@ export function CountryMaxxing() {
 
   function handleMapIdentifyExit(result: MapIdentifyResult | null) {
     if (!result) {
-      setPhase("setup");
+      backToSetup();
       return;
     }
     setScore(result);
@@ -270,7 +305,7 @@ export function CountryMaxxing() {
 
   function handlePromptAndAnswerExit(result: PromptAndAnswerResult | null) {
     if (!result) {
-      setPhase("setup");
+      backToSetup();
       return;
     }
     setScore(result);
@@ -286,7 +321,7 @@ export function CountryMaxxing() {
 
   function handleBorderExit(result: BorderResult | null) {
     if (!result) {
-      setPhase("setup");
+      backToSetup();
       return;
     }
     setScore(result);
@@ -370,7 +405,7 @@ export function CountryMaxxing() {
           Play again
         </button>
         <button
-          onClick={() => setPhase("setup")}
+          onClick={backToSetup}
           className="mt-2 w-full rounded-md py-2 text-sm text-ink-soft transition-colors hover:text-ink dark:text-ink-soft-dark dark:hover:text-ink-dark"
         >
           Back to settings
@@ -411,6 +446,7 @@ export function CountryMaxxing() {
     // with the mastered-count line right above it.
     const rounds = roundBreakdown(sessionTally);
     const showRounds = rounds.length > 1;
+    const missedItems = reviewList(sessionTally);
 
     return (
       <motion.div
@@ -484,7 +520,15 @@ export function CountryMaxxing() {
           </p>
         )}
         {sessionTally.length > 0 && <ReviewMap pool={pool} sessionTally={sessionTally} />}
-        <ReviewDrawer items={reviewList(sessionTally)} />
+        <ReviewDrawer items={missedItems} />
+        {sessionType === "quiz" && missedItems.length > 0 && (
+          <button
+            onClick={learnMissed}
+            className="mt-3 w-full cursor-pointer rounded-md border-2 border-dashed border-ink/30 py-3 text-sm font-medium text-ink transition-colors hover:border-ink/50 dark:border-ink-dark/30 dark:text-ink-dark dark:hover:border-ink-dark/50"
+          >
+            Learn what I missed ({missedItems.length})
+          </button>
+        )}
         <button
           onClick={playAgain}
           className={`mt-6 w-full rounded-md py-3 font-medium text-white transition-opacity hover:opacity-90 ${accentSolidClass(ACCENT)}`}
@@ -492,7 +536,7 @@ export function CountryMaxxing() {
           Play again
         </button>
         <button
-          onClick={() => setPhase("setup")}
+          onClick={backToSetup}
           className="mt-2 w-full rounded-md py-2 text-sm text-ink-soft transition-colors hover:text-ink dark:text-ink-soft-dark dark:hover:text-ink-dark"
         >
           Back to settings
