@@ -672,6 +672,23 @@ export function WorldMap({
     justFilledIds,
   ]);
 
+  // A pulsing "locate me" ring at the current question's centroid, on top of
+  // its own current-pulse yellow fill — color alone wasn't always enough to
+  // pick it out at a glance when a wrong-answer red country happened to sit
+  // right next to it (both are warm hues on the dark map background). Reuses
+  // built.bounds (already computed for the auto-zoom inset above) rather
+  // than measuring the shape again. Radius is clamped so a huge current
+  // country doesn't balloon into a ring bigger than the map — this is a
+  // locator, not an attempt to trace the actual outline.
+  const currentRingBounds =
+    currentCcn3 !== undefined && !reviewTierByCcn3 ? built?.bounds.get(currentCcn3) : undefined;
+  const currentRingCenterX = currentRingBounds ? (currentRingBounds[0] + currentRingBounds[2]) / 2 : 0;
+  const currentRingCenterY = currentRingBounds ? (currentRingBounds[1] + currentRingBounds[3]) / 2 : 0;
+  const currentRingSize = currentRingBounds
+    ? Math.max(currentRingBounds[2] - currentRingBounds[0], currentRingBounds[3] - currentRingBounds[1])
+    : 0;
+  const currentRingRadius = Math.min(Math.max(currentRingSize / 2 + 6, 10), 28);
+
   const autoZoomBounds = autoZoomCcn3 ? built?.bounds.get(autoZoomCcn3) : undefined;
   const autoZoomSize = autoZoomBounds
     ? Math.max(autoZoomBounds[2] - autoZoomBounds[0], autoZoomBounds[3] - autoZoomBounds[1])
@@ -998,6 +1015,17 @@ export function WorldMap({
           {built.pointElements}
           {built.dotElements}
           {built.pinElements}
+          {currentRingBounds && (
+            <circle
+              cx={currentRingCenterX}
+              cy={currentRingCenterY}
+              r={currentRingRadius}
+              fill="none"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+              className="pin-pulse pointer-events-none stroke-cat-yellow dark:stroke-cat-yellow-dark"
+            />
+          )}
         </svg>
       </div>
       <canvas ref={canvasRef} style={{ display: "none" }} />
