@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 // Per-item record of every attempt this session, in the order they
 // happened — the raw material for the summary screen's round breakdown,
@@ -17,28 +17,47 @@ export interface TalliedItem {
 export interface SessionTally {
   record(item: { cca3: string; label: string; flag: string }, correct: boolean, gaveUp?: boolean): void;
   getItems(): TalliedItem[];
+  /** Bumped on every record() call. getItems() always returns a fresh
+   * array (and a fresh Map, if a caller derives one from it), so it can't
+   * itself be a useMemo/useEffect dependency — version is the stable
+   * signal a caller derives off instead (e.g. One Stop's live per-country
+   * map coloring, recomputed only when an attempt actually lands rather
+   * than on every render). */
+  version: number;
 }
 
-// A plain mutable ref, not reactive state — every play screen calls
-// record() far more often (every attempt) than anything needs to re-render
-// off of it; the summary screen only ever reads the final snapshot once,
-// via getItems() at onExit.
+// The underlying storage is a plain mutable ref, not reactive state — every
+// play screen calls record() far more often (every attempt) than anything
+// needs to re-render off of it, and the summary screen only ever reads the
+// final snapshot once, via getItems() at onExit. version is the one bit of
+// real state, kept minimal (just a counter) so a caller that DOES want to
+// react to new attempts (rather than only read them at exit) has something
+// to key a memo on, without turning the whole tally into React state.
+// record/getItems are useCallback'd (empty deps — they only close over
+// itemsRef and setVersion, both stable across renders), and the returned
+// object itself is memoized on version — so the whole SessionTally value
+// only changes identity on an actual record() call, not every render. A
+// caller can depend on it directly in its own useMemo/useEffect and get
+// real, correctly-exhaustive (and cheap) invalidation.
 export function useSessionTally(): SessionTally {
   const itemsRef = useRef(new Map<string, TalliedItem>());
+  const [version, setVersion] = useState(0);
 
-  function record(item: { cca3: string; label: string; flag: string }, correct: boolean, gaveUp = false): void {
-    const existing = itemsRef.current.get(item.cca3);
-    const entry: TalliedItem = existing ?? { ...item, attempts: [], gaveUp: false };
-    entry.attempts = [...entry.attempts, correct];
-    if (gaveUp) entry.gaveUp = true;
-    itemsRef.current.set(item.cca3, entry);
-  }
+  const record = useCallback(
+    (item: { cca3: string; label: string; flag: string }, correct: boolean, gaveUp = false): void => {
+      const existing = itemsRef.current.get(item.cca3);
+      const entry: TalliedItem = existing ?? { ...item, attempts: [], gaveUp: false };
+      entry.attempts = [...entry.attempts, correct];
+      if (gaveUp) entry.gaveUp = true;
+      itemsRef.current.set(item.cca3, entry);
+      setVersion((v) => v + 1);
+    },
+    [],
+  );
 
-  function getItems(): TalliedItem[] {
-    return Array.from(itemsRef.current.values());
-  }
+  const getItems = useCallback((): TalliedItem[] => Array.from(itemsRef.current.values()), []);
 
-  return { record, getItems };
+  return useMemo(() => ({ record, getItems, version }), [record, getItems, version]);
 }
 
 // Groups by attempt index rather than by queue-traversal order — robust to
