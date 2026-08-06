@@ -519,7 +519,7 @@ export function CountryMaxxing() {
               .join(" · ")}
           </p>
         )}
-        {sessionTally.length > 0 && <ReviewMap pool={pool} sessionTally={sessionTally} />}
+        {sessionTally.length > 0 && <ReviewMap pool={pool} sessionTally={sessionTally} sessionType={sessionType} />}
         <ReviewDrawer items={missedItems} />
         {sessionType === "quiz" && missedItems.length > 0 && (
           <button

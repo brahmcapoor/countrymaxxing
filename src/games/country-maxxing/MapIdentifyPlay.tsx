@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Country } from "../../data/countries";
+import { withArticle, type Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
 import { DarkModeToggle } from "../../components/DarkModeToggle";
@@ -19,7 +19,7 @@ import {
   type TalliedItem,
 } from "../../core/sessionTally";
 import { ReviewItemsList } from "./ReviewDrawer";
-import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
+import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER, MAP_SCATTERED_TERRITORY } from "../../data/mapCoverage";
 import {
   buildMapIdentifyQueue,
   capitalMatchCandidates,
@@ -123,6 +123,12 @@ export function MapIdentifyPlay({
   // see WorldMap's alwaysInsetFocusByCcn3.
   const alwaysInsetFocusByCcn3 = useRef(
     new Map(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
+  ).current;
+  // See WorldMap's boundsFocusByCcn3 — France/Netherlands/Chile's real
+  // overseas territory otherwise pulls the auto-zoom anchor's center out
+  // into open ocean between the mainland and the exclave.
+  const boundsFocusByCcn3 = useRef(
+    new Map(pool.filter((c) => MAP_SCATTERED_TERRITORY.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
   ).current;
 
   const current = queue[0] ?? null;
@@ -307,6 +313,7 @@ export function MapIdentifyPlay({
         pointCountries={pointCountries}
         autoZoomCcn3={current.ccn3}
         alwaysInsetFocusByCcn3={alwaysInsetFocusByCcn3}
+        boundsFocusByCcn3={boundsFocusByCcn3}
         className="h-full w-full portrait:w-auto"
       />
 
@@ -417,8 +424,8 @@ export function MapIdentifyPlay({
                     {result.countryCorrect
                       ? `Correct! ${current.flag}`
                       : gaveUp
-                        ? `It's ${current.name}. ${current.flag}`
-                        : `Not quite — it's ${current.name}. ${current.flag}`}
+                        ? `It's ${withArticle(current)}. ${current.flag}`
+                        : `Not quite — it's ${withArticle(current)}. ${current.flag}`}
                   </p>
                   {askCapital && (
                     <p

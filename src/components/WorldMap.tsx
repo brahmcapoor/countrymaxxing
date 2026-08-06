@@ -11,6 +11,7 @@ import { geoBounds, geoCentroid, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import { randomLoadingMessage } from "../data/loadingMessages";
 import { MAP_EXCLUDE_RENDER } from "../data/mapCoverage";
+import { KOSOVO_RING } from "../data/kosovoGeometry";
 import { crossesProjectionSeam, geometryNearPoint } from "./mapGeometry";
 
 interface CountryFeature {
@@ -18,6 +19,45 @@ interface CountryFeature {
   id: string; // ccn3
   properties: { name: string };
   geometry: unknown;
+}
+
+// Several disputed/dependent territories world-atlas can't assign a real
+// ISO 3166-1 numeric code to (Kosovo, Somaliland, Northern Cyprus, the
+// Indian Ocean Territories, Siachen Glacier) all come back from topojson
+// with `id: undefined` — none of them are in our 197-country set, so this
+// id can't be relied on to tell them apart from each other, only to say
+// "not a real, joinable country feature." Kosovo is the one exception genuinely
+// in our set; KOSOVO_FEATURE below re-attaches its real geometry (see
+// kosovoGeometry.ts) to countries.ts's KOSOVO_CCN3 so it joins like any
+// other country instead of falling out with the rest of this group.
+const KOSOVO_FEATURE: CountryFeature = {
+  type: "Feature",
+  id: "XKX",
+  properties: { name: "Kosovo" },
+  geometry: { type: "Polygon", coordinates: [KOSOVO_RING] },
+};
+
+// Palau's own topology feature carries a real data error, distinct from the
+// id-undefined group above: alongside its actual archipelago (~134.5-134.7°E)
+// its MultiPolygon includes a second, tiny (9-point) speck around 131.16°E,
+// 3.04°N — in the Molucca Sea near Halmahera, Indonesia, ~600km from any
+// real Palauan territory. Not a legitimate remote Palauan island (Palau has
+// none out there); just a mis-tagged sliver carried over from the source
+// data. Real Palau starts at 133°E, so anything west of that in this one
+// feature is the stray piece — dropped rather than rendered or counted
+// toward its bounds (it was dragging the current-question ring/auto-zoom
+// anchor west into open water, same class of bug as MAP_SCATTERED_TERRITORY
+// but from bad geometry rather than real distant land).
+const PALAU_CCN3 = "585";
+const PALAU_REAL_MIN_LON = 133;
+
+function fixPalauGeometry(f: CountryFeature): CountryFeature {
+  const geometry = f.geometry as { type: string; coordinates: [number, number][][][] };
+  if (geometry.type !== "MultiPolygon") return f;
+  const coordinates = geometry.coordinates.filter((polygon) =>
+    polygon[0]!.some(([lon]) => lon >= PALAU_REAL_MIN_LON),
+  );
+  return { ...f, geometry: { type: "MultiPolygon", coordinates } };
 }
 
 let cachedFeatures: CountryFeature[] | null = null;
@@ -29,7 +69,11 @@ async function loadFeatures(): Promise<CountryFeature[]> {
   const topologyModule = await import("world-atlas/countries-50m.json");
   const topology = topologyModule.default as any;
   const geo = feature(topology, topology.objects.countries) as any;
-  cachedFeatures = geo.features as CountryFeature[];
+  const raw = geo.features as CountryFeature[];
+  cachedFeatures = [
+    ...raw.filter((f) => f.id !== undefined).map((f) => (f.id === PALAU_CCN3 ? fixPalauGeometry(f) : f)),
+    KOSOVO_FEATURE,
+  ];
   // Only stalls the genuine first load — once cached, later mounts return
   // immediately above rather than re-paying this delay every time.
   const remaining = MIN_LOADING_MS - (Date.now() - start);
@@ -50,6 +94,18 @@ const BLOWUP_SIZE = 150; // rendered pixel size of the auto-blowup inset
 // world map, don't). 16 sits in the gap between those two clusters.
 const SMALL_COUNTRY_THRESHOLD = 16;
 const POINT_COUNTRY_RADIUS = 3.5; // marker radius for countries with no polygon shape
+// Radius used to trim a MAP_SCATTERED_TERRITORY country down to its capital's
+// own cluster for bounds purposes — deliberately tighter than mapGeometry's
+// shared FOCUS_GROUP_RADIUS_DEGREES (8°, tuned for keeping a whole close
+// archipelago together in one inset). At 8° Tonga's other real island groups
+// (Ha'apai ~0.3°, Vava'u ~2.8° from the capital) would all still count as
+// "near," right back to the same off-center bbox this exists to fix. 2°
+// keeps Tongatapu+Ha'apai together (genuinely close) while dropping Vava'u,
+// and doesn't risk clipping a large contiguous mainland (France, Chile) —
+// the capital always sits inside its own mainland polygon's bounding box
+// regardless of the country's real width, so this only ever affects whether
+// a *separate* polygon counts as near, never the mainland one itself.
+const BOUNDS_FOCUS_RADIUS_DEGREES = 2;
 // Inside the auto-blowup inset: the rendered size under which an island is
 // a smudge rather than a shape, and the radius of the marker that stands in
 // for it when it is. Both in rendered pixels — see insetMarkerRadius.
@@ -329,6 +385,7 @@ export function WorldMap({
   hintPins,
   autoZoomCcn3,
   alwaysInsetFocusByCcn3,
+  boundsFocusByCcn3,
   className,
 }: {
   filledCcn3s: Set<string>;
@@ -392,6 +449,17 @@ export function WorldMap({
    * Cape Verde, compact enough that its whole extent is within the focus
    * radius, is unaffected. */
   alwaysInsetFocusByCcn3?: Map<string, [number, number]>;
+  /** Countries whose real overseas territory (French Guiana, Réunion, Aruba,
+   * Easter Island...) sits far enough from the mainland that the full
+   * feature's bounding box centers on open ocean between them instead of
+   * anywhere the country actually is — see MAP_SCATTERED_TERRITORY. Mapped
+   * to a [longitude, latitude] focus point (in practice the capital), same
+   * mechanism as alwaysInsetFocusByCcn3 (geometryNearPoint) but applied only
+   * to bounds measurement here, not to fit-target seam adjustment or the
+   * always-inset display — these countries render their real mainland shape
+   * and don't need a dedicated inset, they just need the ring/anchor/scroll
+   * math to measure the mainland instead of the whole scattered feature. */
+  boundsFocusByCcn3?: Map<string, [number, number]>;
   className?: string;
 }) {
   const [features, setFeatures] = useState<CountryFeature[] | null>(null);
@@ -686,9 +754,23 @@ export function WorldMap({
         // middle of Africa for Kiribati (see the prop's comment); it's also
         // what the inset was zooming to, hence a "close-up" of the whole
         // world. The rendered path below is still the country's real, complete
-        // geometry — only the measurement is focused.
-        const focus = alwaysInsetFocusByCcn3?.get(f.id);
-        const measured = (focus && geometryNearPoint(f, focus)) || f;
+        // geometry — only the measurement is focused. boundsFocusByCcn3 covers
+        // the same problem for countries whose overseas territory (not a
+        // legibility issue, just distance) pulls the box's center out into
+        // open ocean — see its own comment. It uses a tighter radius than the
+        // always-inset case above: France/Netherlands/Chile's real exclaves
+        // are tens of degrees out (comfortably excluded either way), but
+        // Tonga's own OTHER real island groups (Ha'apai, Vava'u) are only a
+        // couple of degrees from the capital's — the wide radius tuned for
+        // "keep a whole close-together archipelago in one inset" would keep
+        // all of Tonga too, right back where it started.
+        const insetFocus = alwaysInsetFocusByCcn3?.get(f.id);
+        const boundsFocus = boundsFocusByCcn3?.get(f.id);
+        const measured = insetFocus
+          ? geometryNearPoint(f, insetFocus) || f
+          : boundsFocus
+            ? geometryNearPoint(f, boundsFocus, BOUNDS_FOCUS_RADIUS_DEGREES) || f
+            : f;
         const b = path.bounds(measured as any) as [[number, number], [number, number]];
         const box: Bounds = [b[0][0], b[0][1], b[1][0], b[1][1]];
         const existingBox = bounds.get(f.id);
@@ -790,6 +872,7 @@ export function WorldMap({
     hintPins,
     justFilledIds,
     alwaysInsetFocusByCcn3,
+    boundsFocusByCcn3,
   ]);
 
   // Where each island of the auto-zoomed country's focused group sits, and how
@@ -832,7 +915,16 @@ export function WorldMap({
   const currentRingSize = currentRingBounds
     ? Math.max(currentRingBounds[2] - currentRingBounds[0], currentRingBounds[3] - currentRingBounds[1])
     : 0;
-  const currentRingRadius = Math.min(Math.max(currentRingSize / 2 + 6, 10), 28);
+  // The 10-28 clamp below is sized for a real polygon shape (room to sit
+  // just outside its edge). A point-marker country (Kosovo, Tuvalu — see
+  // MAP_HARD_TO_RENDER) has no shape, just a POINT_COUNTRY_RADIUS dot, so
+  // that same clamp floats a ring roughly 3x the dot's own size with nothing
+  // visible for it to hug — it reads as a stray circle rather than a locator.
+  // Scale it off the dot's own radius instead.
+  const isCurrentPointCountry = currentCcn3 !== undefined && !!pointCountries?.has(currentCcn3);
+  const currentRingRadius = isCurrentPointCountry
+    ? POINT_COUNTRY_RADIUS + 3
+    : Math.min(Math.max(currentRingSize / 2 + 6, 10), 28);
 
   const autoZoomBounds = autoZoomCcn3 ? built?.bounds.get(autoZoomCcn3) : undefined;
   const autoZoomSize = autoZoomBounds

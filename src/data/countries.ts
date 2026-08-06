@@ -25,6 +25,19 @@ export interface Country {
 // these three de facto states, matching the commonly-quizzed count of 197.
 const INCLUDE_DESPITE_NOT_INDEPENDENT = new Set(["Kosovo", "Taiwan", "Palestine"]);
 
+// Kosovo has no ISO 3166-1 numeric code (not universally recognized), so
+// world-countries leaves ccn3 "" — unlike every other country here, whose
+// ccn3 is a real numeric id doubling as the join key into world-atlas's map
+// topology. An empty string is still a technically-valid, technically-unique
+// Map key, so most ccn3-keyed lookups happened to limp along regardless, but
+// it collided with WorldMap.tsx's own KOSOVO_FEATURE substitute id and read
+// as a missing/placeholder value everywhere else that treats ccn3 as opaque.
+// XKX is the temporary/user-assigned ISO 3166-1 alpha-3 code multiple
+// international bodies (the EU, SWIFT) already use for Kosovo in exactly
+// this situation — WorldMap.tsx's KOSOVO_FEATURE uses the same id so the two
+// join up.
+const KOSOVO_CCN3 = "XKX";
+
 // Each of these countries genuinely has two current, officially-recognized
 // capital-like seats (constitutional/legislative vs. executive/administrative)
 // but world-countries only lists one. The listed one stays primary/displayed
@@ -49,6 +62,33 @@ const BAD_BORDERS: Record<string, string[]> = {
   IND: ["LKA"],
 };
 
+// A handful of country common names are conventionally spoken/written with a
+// leading "the" ("the United Kingdom," "the Bahamas") — not a generalizable
+// grammar rule (compare "Ivory Coast," "Czechia," which take none), so this
+// is a hand-picked list, same idea as EXTRA_CAPITALS/BAD_BORDERS above. Use
+// withArticle() wherever a country name is embedded in a full sentence
+// ("What is the capital of ___?"); a flag+name label/list item reads fine
+// without it and shouldn't use this.
+const COUNTRIES_WITH_ARTICLE = new Set([
+  "ARE", // United Arab Emirates
+  "BHS", // Bahamas
+  "CAF", // Central African Republic
+  "COG", // Republic of the Congo
+  "COM", // Comoros
+  "GBR", // United Kingdom
+  "GMB", // Gambia
+  "MDV", // Maldives
+  "MHL", // Marshall Islands
+  "NLD", // Netherlands
+  "PHL", // Philippines
+  "SLB", // Solomon Islands
+  "USA", // United States
+]);
+
+export function withArticle(country: Pick<Country, "cca3" | "name">): string {
+  return COUNTRIES_WITH_ARTICLE.has(country.cca3) ? `the ${country.name}` : country.name;
+}
+
 export const countries: Country[] = raw
   .filter(
     (c) =>
@@ -68,7 +108,7 @@ export const countries: Country[] = raw
       region: c.region,
       subregion: c.subregion,
       cca3: c.cca3,
-      ccn3: c.ccn3,
+      ccn3: c.cca3 === "UNK" ? KOSOVO_CCN3 : c.ccn3,
       latlng: c.latlng as [number, number],
       borders: c.borders.filter((b) => !BAD_BORDERS[c.cca3]?.includes(b)),
       flag: c.flag,

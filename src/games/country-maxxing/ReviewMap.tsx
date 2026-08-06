@@ -41,7 +41,22 @@ const SCALE_STEPS: (number | null)[] = [
 // Deliberately session-scoped: "how did today go" is a different question
 // from "what am I weak on lifetime," and conflating them would make a
 // single rough session look like a permanent trouble spot on this map.
-export function ReviewMap({ pool, sessionTally }: { pool: Country[]; sessionTally: TalliedItem[] }) {
+export function ReviewMap({
+  pool,
+  sessionTally,
+  sessionType,
+}: {
+  pool: Country[];
+  sessionTally: TalliedItem[];
+  // Quiz mode never requeues a miss (see engine.ts's tierByCcn3), so every
+  // country lands on exactly 1 try — the darker-with-more-tries gradient
+  // this legend explains never actually varies there, just a flat
+  // right/wrong split. Showing a "darker = more tries" scale for a stat
+  // that's always 1 is misleading, not just unhelpful, so it's Learn-mode
+  // only; Quiz mode keeps the plain right/wrong map coloring without it.
+  sessionType?: "learn" | "quiz";
+}) {
+  const showTriesScale = sessionType !== "quiz";
   const poolCcn3s = useMemo(() => new Set(pool.map((c) => c.ccn3)), [pool]);
   // No single "current" country here to give a dedicated auto-zoom inset to
   // (this is a many-countries-at-once overview, not a per-question map) —
@@ -93,40 +108,45 @@ export function ReviewMap({ pool, sessionTally }: { pool: Country[]; sessionTall
             so it reads as an axis for what's on the map, not a caption under
             it — same idea as a chart's colorbar. Try-count labels sit beside
             the bar rather than inside it (too narrow for text) and only
-            appear for steps this session actually produced. */}
-        <div className="flex w-14 shrink-0 flex-col items-center">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-cat-green dark:text-cat-green-dark">
-            Right
-          </span>
-          <div className="relative mt-1 w-2.5 flex-1">
-            <div className="flex h-full w-2.5 flex-col overflow-hidden rounded-full">
-              {SCALE_SEGMENTS.map((swatchClass, i) => (
-                <span key={i} className={`flex-1 ${swatchClass}`} />
-              ))}
+            appear for steps this session actually produced. Learn mode only
+            — see showTriesScale. */}
+        {showTriesScale && (
+          <div className="flex w-14 shrink-0 flex-col items-center">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-cat-green dark:text-cat-green-dark">
+              Right
+            </span>
+            <div className="relative mt-1 w-2.5 flex-1">
+              <div className="flex h-full w-2.5 flex-col overflow-hidden rounded-full">
+                {SCALE_SEGMENTS.map((swatchClass, i) => (
+                  <span key={i} className={`flex-1 ${swatchClass}`} />
+                ))}
+              </div>
+              {SCALE_STEPS.map((step, i) => {
+                if (step === null) return null;
+                const outcome = i < SCALE_SEGMENTS.length / 2 ? "correct" : "wrong";
+                if (!presentSteps[outcome].has(step)) return null;
+                const label = step < REVIEW_TIER_MAX_TRIES ? String(step) : `${REVIEW_TIER_MAX_TRIES}+`;
+                return (
+                  <span
+                    key={i}
+                    className="absolute left-4 -translate-y-1/2 text-[10px] tabular-nums text-ink-soft dark:text-ink-soft-dark"
+                    style={{ top: `${((i + 0.5) / SCALE_SEGMENTS.length) * 100}%` }}
+                  >
+                    {label}
+                  </span>
+                );
+              })}
             </div>
-            {SCALE_STEPS.map((step, i) => {
-              if (step === null) return null;
-              const outcome = i < SCALE_SEGMENTS.length / 2 ? "correct" : "wrong";
-              if (!presentSteps[outcome].has(step)) return null;
-              const label = step < REVIEW_TIER_MAX_TRIES ? String(step) : `${REVIEW_TIER_MAX_TRIES}+`;
-              return (
-                <span
-                  key={i}
-                  className="absolute left-4 -translate-y-1/2 text-[10px] tabular-nums text-ink-soft dark:text-ink-soft-dark"
-                  style={{ top: `${((i + 0.5) / SCALE_SEGMENTS.length) * 100}%` }}
-                >
-                  {label}
-                </span>
-              );
-            })}
+            <span className="mt-1 text-[10px] font-medium uppercase tracking-wide text-cat-red dark:text-cat-red-dark">
+              Wrong
+            </span>
           </div>
-          <span className="mt-1 text-[10px] font-medium uppercase tracking-wide text-cat-red dark:text-cat-red-dark">
-            Wrong
-          </span>
-        </div>
+        )}
       </div>
       <p className="mt-2 text-center text-xs text-ink-soft dark:text-ink-soft-dark">
-        Darker = more tries · gray = not asked this session · hover a country for its capital
+        {showTriesScale
+          ? "Darker = more tries · gray = not asked this session · hover a country for its capital"
+          : "Green = correct · red = missed · gray = not asked this session · hover a country for its capital"}
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-import { countries as allCountries, type Country } from "../../data/countries";
+import { countries as allCountries, withArticle, type Country } from "../../data/countries";
 import { borderLengthBetween } from "../../data/borderLengths";
 import { getMissWeight, getStat, pickWeighted, recordAttempt } from "../../core/stats";
 import type { TalliedItem } from "../../core/sessionTally";
@@ -130,12 +130,12 @@ export function buildQueue(pool: Country[], directionSetting: DirectionSetting):
 
 export function promptFor(question: Question): string {
   return question.direction === "country-to-capital"
-    ? `What is the capital of ${question.country.name}?`
+    ? `What is the capital of ${withArticle(question.country)}?`
     : `${question.country.capital} is the capital of which country?`;
 }
 
 export function expectedAnswer(question: Question): string {
-  return question.direction === "country-to-capital" ? question.country.capital : question.country.name;
+  return question.direction === "country-to-capital" ? question.country.capital : withArticle(question.country);
 }
 
 // A capital literally named "<Place> City" or "City of <Place>" (Kuwait
@@ -346,16 +346,16 @@ export function buildBorderQueue(pool: Country[], typeSetting: BorderQuestionTyp
 
 export function borderPromptFor(question: BorderQuestion): string {
   if (question.type === "name-neighbors") {
-    return `Which countries border ${question.country.name}?`;
+    return `Which countries border ${withArticle(question.country)}?`;
   }
   if (question.type === "reverse-lookup") {
     if (question.neighbors.length === 1) {
-      return `Which country's only land border is with ${question.neighbors[0]!.name}?`;
+      return `Which country's only land border is with ${withArticle(question.neighbors[0]!)}?`;
     }
-    const names = question.neighbors.map((n) => n.name).join(", ");
+    const names = question.neighbors.map((n) => withArticle(n)).join(", ");
     return `Which country borders all of: ${names}?`;
   }
-  return `Which of ${question.country.name}'s neighbors shares its ${question.extreme} land border with it?`;
+  return `Which of ${withArticle(question.country)}'s neighbors shares its ${question.extreme} land border with it?`;
 }
 
 /** The single neighbor with the longest/shortest shared border — undefined
@@ -377,8 +377,9 @@ export function borderMatchCandidates(question: BorderQuestion): string[] {
 }
 
 export function borderExpectedAnswer(question: BorderQuestion): string {
-  if (question.type === "reverse-lookup") return question.country.name;
-  return longestShortestNeighbor(question)?.name ?? "";
+  if (question.type === "reverse-lookup") return withArticle(question.country);
+  const answer = longestShortestNeighbor(question);
+  return answer ? withArticle(answer) : "";
 }
 
 export function recordBorderAttempt(question: BorderQuestion, correct: boolean): void {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { countries, type Country } from "../../data/countries";
+import { countries, withArticle, type Country } from "../../data/countries";
 import { WorldMap } from "../../components/WorldMap";
 import { SoundToggle } from "../../components/SoundToggle";
 import { DarkModeToggle } from "../../components/DarkModeToggle";
@@ -19,7 +19,7 @@ import {
   type TalliedItem,
 } from "../../core/sessionTally";
 import { ReviewItemsList } from "./ReviewDrawer";
-import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
+import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER, MAP_SCATTERED_TERRITORY } from "../../data/mapCoverage";
 import {
   borderExpectedAnswer,
   borderMatchCandidates,
@@ -125,6 +125,12 @@ export function BorderPlay({
   const alwaysInsetFocusByCcn3 = useRef(
     new Map(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
   ).current;
+  // See WorldMap's boundsFocusByCcn3 — France/Netherlands/Chile's real
+  // overseas territory otherwise pulls the current-question ring's center
+  // out into open ocean between the mainland and the exclave.
+  const boundsFocusByCcn3 = useRef(
+    new Map(pool.filter((c) => MAP_SCATTERED_TERRITORY.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
+  ).current;
 
   const current = queue[0] ?? null;
   const currentKey = current ? borderQuestionKey(current) : null;
@@ -203,7 +209,7 @@ export function BorderPlay({
       (n) => foundNeighborCca3s.has(n.cca3) && isCloseMatch(trimmed, [n.name, ...n.altNames]),
     );
     if (already) {
-      setHint({ kind: "already", text: `Already got ${already.name}.` });
+      setHint({ kind: "already", text: `Already got ${withArticle(already)}.` });
       setInput("");
       return;
     }
@@ -221,7 +227,7 @@ export function BorderPlay({
       );
       setHint(
         realCountry
-          ? { kind: "wrong", text: `${realCountry.name} doesn't border ${current.country.name}.` }
+          ? { kind: "wrong", text: `${withArticle(realCountry)} doesn't border ${withArticle(current.country)}.` }
           : { kind: "unknown", text: "Not finding that one — try another spelling?" },
       );
       return;
@@ -386,6 +392,7 @@ export function BorderPlay({
           pointCountries={pointCountries}
           autoZoomCcn3={currentCcn3}
           alwaysInsetFocusByCcn3={alwaysInsetFocusByCcn3}
+          boundsFocusByCcn3={boundsFocusByCcn3}
           className={`w-full portrait:w-auto transition-[height] duration-300 ${isTyping ? "h-[35dvh]" : "h-full"}`}
         />
       )}
@@ -497,7 +504,7 @@ export function BorderPlay({
                           ? "Got them all — nice."
                           : `Missed ${current.neighbors
                               .filter((n) => !foundNeighborCca3s.has(n.cca3))
-                              .map((n) => n.name)
+                              .map((n) => withArticle(n))
                               .join(", ")}.`}
                       </p>
                     ) : (

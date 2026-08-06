@@ -20,7 +20,7 @@ import {
   type TalliedItem,
 } from "../../core/sessionTally";
 import { ReviewItemsList } from "./ReviewDrawer";
-import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER } from "../../data/mapCoverage";
+import { MAP_ALWAYS_INSET, MAP_HARD_TO_RENDER, MAP_SCATTERED_TERRITORY } from "../../data/mapCoverage";
 import {
   buildQueue,
   expectedAnswer,
@@ -124,6 +124,12 @@ export function PromptAndAnswerPlay({
   const alwaysInsetFocusByCcn3 = useRef(
     new Map(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
   ).current;
+  // See WorldMap's boundsFocusByCcn3 — France/Netherlands/Chile's real
+  // overseas territory otherwise pulls the current-question ring's center
+  // out into open ocean between the mainland and the exclave.
+  const boundsFocusByCcn3 = useRef(
+    new Map(pool.filter((c) => MAP_SCATTERED_TERRITORY.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
+  ).current;
   const countryByCcn3 = useRef(new Map(pool.map((c) => [c.ccn3, c] as const))).current;
   // Derived straight off sessionTally rather than mirrored into its own
   // state — replaces the old completedCcn3s/wrongCcn3s state, which just
@@ -146,14 +152,17 @@ export function PromptAndAnswerPlay({
   }, [feedback, retyped, currentKey]);
 
   // A correct answer (or a successfully retyped one) auto-advances after a
-  // beat; still-unretyped incorrect waits on the user. The effect's own
-  // cleanup (on feedback/retyped/currentKey change) cancels it — no manual
-  // clearing needed in advance()/skip()/jumpTo().
+  // beat; still-unretyped incorrect waits on the user — except in Quiz mode,
+  // which never shows the answer to retype in the first place (see
+  // submitAnswer/handleSubmit below) and so auto-advances a miss immediately,
+  // same as a hit. The effect's own cleanup (on feedback/retyped/currentKey
+  // change) cancels it — no manual clearing needed in advance()/skip()/jumpTo().
   useEffect(() => {
-    if (feedback !== "correct" && !(feedback === "incorrect" && retyped)) return;
+    const ready = feedback === "correct" || (feedback === "incorrect" && (retyped || sessionType === "quiz"));
+    if (!ready) return;
     const timeout = setTimeout(() => advanceRef.current(), 800);
     return () => clearTimeout(timeout);
-  }, [feedback, retyped, currentKey]);
+  }, [feedback, retyped, currentKey, sessionType]);
 
   // The wrong guess shakes itself out rather than sitting there readOnly —
   // cleared once the shake animation (0.35s) finishes, so the box reads as
@@ -266,9 +275,11 @@ export function PromptAndAnswerPlay({
       submitAnswer(input);
       return;
     }
-    if (feedback === "incorrect" && !retyped) {
+    if (feedback === "incorrect" && !retyped && sessionType === "learn") {
       // Reading the correct answer isn't enough to lock it in — require
       // producing it once (not scored, not a new attempt) before moving on.
+      // Learn mode only: Quiz mode never shows the answer to retype (see
+      // the feedback box below), so there's nothing to require here.
       if (!input.trim()) return;
       if (isCloseMatch(input, matchCandidates(current))) {
         setRetyped(true);
@@ -284,15 +295,22 @@ export function PromptAndAnswerPlay({
 
   const skippedPending = queue.filter((q) => skippedKeys.has(questionKey(q)));
   const reviewItems = reviewList(sessionTally.getItems());
-  const awaitingRetype = feedback === "incorrect" && !retyped;
-  const canAdvance = feedback === "correct" || (feedback === "incorrect" && retyped);
+  const awaitingRetype = feedback === "incorrect" && !retyped && sessionType === "learn";
+  const canAdvance = feedback === "correct" || (feedback === "incorrect" && (retyped || sessionType === "quiz"));
 
   // Highlighting the country on the map before it's answered would hand over
   // the answer outright when the question is "capital → country" (the
   // highlighted shape *is* the answer). It's safe for "country → capital"
   // (the text prompt already names the country), and always safe once
-  // answered, as a confirming reveal.
-  const safeToReveal = feedback !== "idle" || current.direction === "country-to-capital";
+  // answered correctly (a confirming reveal, not a leak). A wrong answer in
+  // Learn mode still reveals it — same reasoning as the text feedback above,
+  // it's the whole point there — but Quiz mode keeps it hidden on a miss,
+  // same as the text: the map highlight would just be a silent version of
+  // the same answer this session isn't supposed to hand out mid-round.
+  const safeToReveal =
+    current.direction === "country-to-capital" ||
+    feedback === "correct" ||
+    (feedback === "incorrect" && sessionType === "learn");
   const currentCcn3 = safeToReveal ? current.country.ccn3 : undefined;
   const dotCcn3s = new Set([...currentTierByCcn3.keys(), ...(currentCcn3 ? [currentCcn3] : [])]);
   const capitalDots = new Map(
@@ -316,6 +334,7 @@ export function PromptAndAnswerPlay({
         pointCountries={pointCountries}
         autoZoomCcn3={currentCcn3}
         alwaysInsetFocusByCcn3={alwaysInsetFocusByCcn3}
+        boundsFocusByCcn3={boundsFocusByCcn3}
         className={`w-full portrait:w-auto transition-[height] duration-300 ${isTyping ? "h-[35dvh]" : "h-full"}`}
       />
 
@@ -420,7 +439,13 @@ export function PromptAndAnswerPlay({
               <div className="flex flex-1 items-center justify-center px-4 py-3 text-center">
                 {feedback === "incorrect" ? (
                   <p className="font-serif text-xl text-cat-red dark:text-cat-red-dark">
-                    {gaveUp ? `It's ${expectedAnswer(current)}.` : `Not quite — it's ${expectedAnswer(current)}.`}
+                    {sessionType === "quiz"
+                      ? gaveUp
+                        ? "Skipped."
+                        : "Not quite."
+                      : gaveUp
+                        ? `It's ${expectedAnswer(current)}.`
+                        : `Not quite — it's ${expectedAnswer(current)}.`}
                   </p>
                 ) : (
                   <div>
