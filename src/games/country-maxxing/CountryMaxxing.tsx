@@ -13,6 +13,7 @@ import { NameAllPlay } from "./NameAllPlay";
 import { MapIdentifyPlay, type MapIdentifyResult } from "./MapIdentifyPlay";
 import { PromptAndAnswerPlay, type PromptAndAnswerResult } from "./PromptAndAnswerPlay";
 import { BorderPlay, type BorderResult } from "./BorderPlay";
+import { SizeComparePlay, type SizeCompareResult } from "./SizeComparePlay";
 import { PassportPage } from "./PassportPage";
 import { ReviewDrawer } from "./ReviewDrawer";
 import { ReviewMap } from "./ReviewMap";
@@ -21,10 +22,12 @@ import {
   borderEligiblePool,
   nameAllListLabel,
   poolForRegions,
+  sizeCompareEligiblePool,
   weakPoolFor,
   weakPoolForBorders,
   weakPoolForMapIdentify,
   weakPoolForNameAll,
+  weakPoolForSizeCompare,
   type BorderQuestionTypeSetting,
   type DirectionSetting,
   type NameAllSubject,
@@ -34,7 +37,7 @@ import {
 const ACCENT = "red"; // CountryMaxxing is slot 1 in the top-level game registry
 const SPEED_ROUND_OPTIONS = [600, 900, 1800] as const; // 10, 15, 30 minutes
 
-type Format = "prompt-answer" | "name-all" | "map-identify" | "borders";
+type Format = "prompt-answer" | "name-all" | "map-identify" | "borders" | "size-compare";
 
 // Yellow reads poorly with white text at any lightness we'd want for a solid
 // fill — everything else in the categorical set is dark/saturated enough.
@@ -57,6 +60,13 @@ const FORMAT_OPTIONS: { id: Format; label: string; hint: string; glyph: string; 
     glyph: "◫",
     hue: "violet",
   },
+  {
+    id: "size-compare",
+    label: "It's Relative",
+    hint: "Guess the true scale.",
+    glyph: "⚖",
+    hue: "green",
+  },
 ];
 
 const PANEL_TRANSITION = { duration: 0.24, ease: [0.22, 1, 0.36, 1] } as const;
@@ -77,6 +87,10 @@ const CATEGORY_LABELS: Record<Format, Record<string, string>> = {
     "reverse-lookup": "Who borders these?",
     "longest-shortest": "Longest / shortest",
   },
+  // Size Compare has only one question shape (unlike the others' direction/
+  // skill/type axes), so its breakdown is by the candidate's region instead
+  // — an identity mapping, since the category key is already the region name.
+  "size-compare": Object.fromEntries(regions.map((r) => [r, r])),
   "name-all": {},
 };
 
@@ -162,19 +176,24 @@ export function CountryMaxxing() {
         ? weakPoolForMapIdentify(regionPool, askCapital)
         : format === "borders"
           ? weakPoolForBorders(regionPool, borderTypeSetting)
-          : weakPoolForNameAll(regionPool, subject);
+          : format === "size-compare"
+            ? weakPoolForSizeCompare(regionPool)
+            : weakPoolForNameAll(regionPool, subject);
   // Name All is free recall — there's no per-item prompt to have gotten
   // "wrong," so a session-completion miss isn't the same signal "focus on
   // weak spots" means for the other two modes. Don't apply it here, even if
   // the checkbox was left checked from a different format.
   const pool = customPool
-    ? // Learn-what-I-missed already ran through borderEligiblePool once
-      // (every item in it was actually asked last session), but reapplying
-      // it here costs nothing and keeps this the single source of truth for
-      // "how many questions this session can contain."
+    ? // Learn-what-I-missed already ran through borderEligiblePool/
+      // sizeCompareEligiblePool once (every item in it was actually asked
+      // last session), but reapplying it here costs nothing and keeps this
+      // the single source of truth for "how many questions this session can
+      // contain."
       format === "borders"
       ? borderEligiblePool(customPool, borderTypeSetting)
-      : customPool
+      : format === "size-compare"
+        ? sizeCompareEligiblePool(customPool)
+        : customPool
     : focusOnWeakSpots && format !== "name-all"
       ? weakPool
       : format === "borders"
@@ -186,7 +205,13 @@ export function CountryMaxxing() {
           // summary's mastered/missed math) honest about how many questions
           // this session can actually contain.
           borderEligiblePool(regionPool, borderTypeSetting)
-        : regionPool;
+        : format === "size-compare"
+          ? // Same reasoning as borders above — Tuvalu/Kiribati can't render
+            // a usable silhouette, so pool.length needs to already exclude
+            // them for the Depart count and give-up mastered/missed math to
+            // stay honest about what this session can actually ask.
+            sizeCompareEligiblePool(regionPool)
+          : regionPool;
   // Speed round is Name All only — "how many can you name in 60 seconds" is
   // a natural race-the-clock shape. Prompt & Answer and Map Identify don't
   // fit as cleanly: Learn mode is "loop until you get everything right,"
@@ -328,6 +353,22 @@ export function CountryMaxxing() {
     setRemainingOnGiveUp(result.remaining ?? null);
     setSessionTally(result.sessionTally);
     setCategoryBreakdown(result.typeBreakdown);
+    setPhase("summary");
+    playStampThunk();
+    const success =
+      sessionType === "learn" ? !result.remaining || result.remaining.length === 0 : result.correct === result.total;
+    if (success) maybeStampPassport();
+  }
+
+  function handleSizeCompareExit(result: SizeCompareResult | null) {
+    if (!result) {
+      backToSetup();
+      return;
+    }
+    setScore(result);
+    setRemainingOnGiveUp(result.remaining ?? null);
+    setSessionTally(result.sessionTally);
+    setCategoryBreakdown(result.regionBreakdown);
     setPhase("summary");
     playStampThunk();
     const success =
@@ -592,6 +633,10 @@ export function CountryMaxxing() {
     );
   }
 
+  if (phase === "play" && format === "size-compare") {
+    return <SizeComparePlay pool={pool} sessionType={sessionType} onExit={handleSizeCompareExit} />;
+  }
+
   if (phase === "passport") {
     return <PassportPage onClose={() => setPhase("setup")} />;
   }
@@ -730,7 +775,10 @@ export function CountryMaxxing() {
       </div>
 
       <AnimatePresence mode="wait" initial={false}>
-        {(format === "prompt-answer" || format === "map-identify" || format === "borders") && (
+        {(format === "prompt-answer" ||
+          format === "map-identify" ||
+          format === "borders" ||
+          format === "size-compare") && (
           <motion.div
             key="session-type"
             initial={{ opacity: 0, y: 8, height: 0 }}

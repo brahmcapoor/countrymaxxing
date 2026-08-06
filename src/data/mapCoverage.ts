@@ -72,3 +72,19 @@ export const MAP_SCATTERED_TERRITORY: ReadonlySet<string> = new Set(["FRA", "NLD
 // shape intact. Keyed by ccn3 (not cca3) since these territories aren't in
 // our Country dataset at all to have a cca3 from.
 export const MAP_EXCLUDE_RENDER: ReadonlySet<string> = new Set(["732"]);
+
+// "It's Relative" (size-comparison mode) renders one country's shape in
+// isolation, fit to its own frame — a different legibility question than
+// MAP_HARD_TO_RENDER above, which is about legibility *inside a whole-world
+// map*. Measured directly (fit each candidate to a 200px box on its own,
+// same approach the mode's silhouette renderer uses, and checked every
+// individual island polygon's rendered size): Tuvalu still has no polygon
+// in the topology at all, so it's excluded here too. Kiribati's 19 atolls
+// are still specks even fit to their own frame with nothing else competing
+// for space (every one renders under 2.1px in both dimensions) — the
+// problem there was never whole-map scale, it's that the islands themselves
+// are too small relative to how spread out they are. Cape Verde, by
+// contrast, renders fine in isolation (its 8 islands span 8-32px on the
+// same test) — it only looked bad in MAP_HARD_TO_RENDER's whole-map context,
+// so it's deliberately *not* excluded here.
+export const SIZE_COMPARE_INELIGIBLE: ReadonlySet<string> = new Set(["TUV", "KIR"]);

@@ -18,6 +18,12 @@ export interface Country {
   latlng: [number, number];
   borders: string[];
   flag: string;
+  /** km², from world-countries — metropolitan/mainland figure for the
+   * MAP_SCATTERED_TERRITORY countries (France, Netherlands, Chile, Tonga),
+   * not mainland+overseas-territory total; confirmed against the isolated
+   * silhouette used for "It's Relative" (e.g. France 551,695 km² matches
+   * metropolitan France, not the ~633,000 km² including French Guiana etc). */
+  area: number;
 }
 
 // world-countries flags "independent" per the strict ISO/UN standard (193 UN
@@ -112,6 +118,7 @@ export const countries: Country[] = raw
       latlng: c.latlng as [number, number],
       borders: c.borders.filter((b) => !BAD_BORDERS[c.cca3]?.includes(b)),
       flag: c.flag,
+      area: c.area,
     };
   });
 

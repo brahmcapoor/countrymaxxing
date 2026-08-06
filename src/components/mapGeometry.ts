@@ -1,9 +1,26 @@
 import { geoBounds } from "d3-geo";
+import { MAP_SCATTERED_TERRITORY } from "../data/mapCoverage";
+import type { Country } from "../data/countries";
 
 /** A GeoJSON-ish feature the map renders — see WorldMap.tsx's CountryFeature. */
 interface GeometryFeature {
   geometry: unknown;
 }
+
+/** Radius used to trim a MAP_SCATTERED_TERRITORY country down to its
+ * capital's own cluster for bounds purposes — deliberately tighter than
+ * FOCUS_GROUP_RADIUS_DEGREES (8°, tuned for keeping a whole close
+ * archipelago together in one inset). At 8° Tonga's other real island
+ * groups (Ha'apai ~0.3°, Vava'u ~2.8° from the capital) would all still
+ * count as "near," right back to the same off-center bbox this exists to
+ * fix. 2° keeps Tongatapu+Ha'apai together (genuinely close) while dropping
+ * Vava'u, and doesn't risk clipping a large contiguous mainland (France,
+ * Chile) — the capital always sits inside its own mainland polygon's
+ * bounding box regardless of the country's real width, so this only ever
+ * affects whether a *separate* polygon counts as near, never the mainland
+ * one itself. Shared by WorldMap.tsx (bounds-only, via boundsFocusByCcn3)
+ * and CountrySilhouette.tsx (full isolated render, via isolatedGeometry). */
+export const BOUNDS_FOCUS_RADIUS_DEGREES = 2;
 
 /** How far from its focus point (a country's capital) a polygon can sit and
  * still count as part of the same island group — see geometryNearPoint. 8°
@@ -88,4 +105,23 @@ export function geometryNearPoint(
       coordinates: near.map((polygon) => (polygon as { coordinates: unknown }).coordinates),
     },
   };
+}
+
+/** The geometry a standalone silhouette (CountrySilhouette.tsx) should
+ * render for `country` — its full feature, except for MAP_SCATTERED_TERRITORY
+ * countries, which get trimmed to just the mainland cluster around the
+ * capital the same way WorldMap's boundsFocusByCcn3 already does (France's
+ * full topology feature includes French Guiana/Réunion/Mayotte thousands of
+ * km away; rendering that whole feature as one shape, or fitting a
+ * projection to its bounds, would produce a shape and scale nothing like
+ * "France" as this game's country.area figure — metropolitan-only — means).
+ * Falls back to the full feature if isolating around the capital somehow
+ * finds nothing (shouldn't happen — the capital is always inside its own
+ * mainland polygon — but shouldn't crash the renderer either). */
+export function isolatedGeometry(
+  f: GeometryFeature,
+  country: Pick<Country, "cca3" | "capitalLatLng">,
+): GeometryFeature {
+  if (!MAP_SCATTERED_TERRITORY.has(country.cca3)) return f;
+  return geometryNearPoint(f, country.capitalLatLng, BOUNDS_FOCUS_RADIUS_DEGREES) ?? f;
 }

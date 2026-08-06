@@ -8,77 +8,27 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { geoBounds, geoCentroid, geoNaturalEarth1, geoPath } from "d3-geo";
-import { feature } from "topojson-client";
 import { randomLoadingMessage } from "../data/loadingMessages";
 import { MAP_EXCLUDE_RENDER } from "../data/mapCoverage";
-import { KOSOVO_RING } from "../data/kosovoGeometry";
-import { crossesProjectionSeam, geometryNearPoint } from "./mapGeometry";
+import { BOUNDS_FOCUS_RADIUS_DEGREES, crossesProjectionSeam, geometryNearPoint } from "./mapGeometry";
+import { getCachedFeatures, loadFeatures as loadTopologyFeatures, type CountryFeature } from "./worldTopology";
 
-interface CountryFeature {
-  type: "Feature";
-  id: string; // ccn3
-  properties: { name: string };
-  geometry: unknown;
-}
-
-// Several disputed/dependent territories world-atlas can't assign a real
-// ISO 3166-1 numeric code to (Kosovo, Somaliland, Northern Cyprus, the
-// Indian Ocean Territories, Siachen Glacier) all come back from topojson
-// with `id: undefined` — none of them are in our 197-country set, so this
-// id can't be relied on to tell them apart from each other, only to say
-// "not a real, joinable country feature." Kosovo is the one exception genuinely
-// in our set; KOSOVO_FEATURE below re-attaches its real geometry (see
-// kosovoGeometry.ts) to countries.ts's KOSOVO_CCN3 so it joins like any
-// other country instead of falling out with the rest of this group.
-const KOSOVO_FEATURE: CountryFeature = {
-  type: "Feature",
-  id: "XKX",
-  properties: { name: "Kosovo" },
-  geometry: { type: "Polygon", coordinates: [KOSOVO_RING] },
-};
-
-// Palau's own topology feature carries a real data error, distinct from the
-// id-undefined group above: alongside its actual archipelago (~134.5-134.7°E)
-// its MultiPolygon includes a second, tiny (9-point) speck around 131.16°E,
-// 3.04°N — in the Molucca Sea near Halmahera, Indonesia, ~600km from any
-// real Palauan territory. Not a legitimate remote Palauan island (Palau has
-// none out there); just a mis-tagged sliver carried over from the source
-// data. Real Palau starts at 133°E, so anything west of that in this one
-// feature is the stray piece — dropped rather than rendered or counted
-// toward its bounds (it was dragging the current-question ring/auto-zoom
-// anchor west into open water, same class of bug as MAP_SCATTERED_TERRITORY
-// but from bad geometry rather than real distant land).
-const PALAU_CCN3 = "585";
-const PALAU_REAL_MIN_LON = 133;
-
-function fixPalauGeometry(f: CountryFeature): CountryFeature {
-  const geometry = f.geometry as { type: string; coordinates: [number, number][][][] };
-  if (geometry.type !== "MultiPolygon") return f;
-  const coordinates = geometry.coordinates.filter((polygon) =>
-    polygon[0]!.some(([lon]) => lon >= PALAU_REAL_MIN_LON),
-  );
-  return { ...f, geometry: { type: "MultiPolygon", coordinates } };
-}
-
-let cachedFeatures: CountryFeature[] | null = null;
 const MIN_LOADING_MS = 1000; // long enough to actually read the joke
 
+// Wraps the shared loader (also used by CountrySilhouette) with WorldMap's
+// own "long enough to read the loading joke" delay — applied only on the
+// genuine first load. getCachedFeatures() lets this tell that apart from a
+// cache hit (which loadTopologyFeatures() alone would resolve near-
+// instantly) without the delay leaking into every later mount.
 async function loadFeatures(): Promise<CountryFeature[]> {
-  if (cachedFeatures) return cachedFeatures;
+  const alreadyCached = getCachedFeatures() !== null;
   const start = Date.now();
-  const topologyModule = await import("world-atlas/countries-50m.json");
-  const topology = topologyModule.default as any;
-  const geo = feature(topology, topology.objects.countries) as any;
-  const raw = geo.features as CountryFeature[];
-  cachedFeatures = [
-    ...raw.filter((f) => f.id !== undefined).map((f) => (f.id === PALAU_CCN3 ? fixPalauGeometry(f) : f)),
-    KOSOVO_FEATURE,
-  ];
-  // Only stalls the genuine first load — once cached, later mounts return
-  // immediately above rather than re-paying this delay every time.
-  const remaining = MIN_LOADING_MS - (Date.now() - start);
-  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  return cachedFeatures;
+  const features = await loadTopologyFeatures();
+  if (!alreadyCached) {
+    const remaining = MIN_LOADING_MS - (Date.now() - start);
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+  return features;
 }
 
 const WIDTH = 800;
@@ -94,18 +44,6 @@ const BLOWUP_SIZE = 150; // rendered pixel size of the auto-blowup inset
 // world map, don't). 16 sits in the gap between those two clusters.
 const SMALL_COUNTRY_THRESHOLD = 16;
 const POINT_COUNTRY_RADIUS = 3.5; // marker radius for countries with no polygon shape
-// Radius used to trim a MAP_SCATTERED_TERRITORY country down to its capital's
-// own cluster for bounds purposes — deliberately tighter than mapGeometry's
-// shared FOCUS_GROUP_RADIUS_DEGREES (8°, tuned for keeping a whole close
-// archipelago together in one inset). At 8° Tonga's other real island groups
-// (Ha'apai ~0.3°, Vava'u ~2.8° from the capital) would all still count as
-// "near," right back to the same off-center bbox this exists to fix. 2°
-// keeps Tongatapu+Ha'apai together (genuinely close) while dropping Vava'u,
-// and doesn't risk clipping a large contiguous mainland (France, Chile) —
-// the capital always sits inside its own mainland polygon's bounding box
-// regardless of the country's real width, so this only ever affects whether
-// a *separate* polygon counts as near, never the mainland one itself.
-const BOUNDS_FOCUS_RADIUS_DEGREES = 2;
 // Inside the auto-blowup inset: the rendered size under which an island is
 // a smudge rather than a shape, and the radius of the marker that stands in
 // for it when it is. Both in rendered pixels — see insetMarkerRadius.

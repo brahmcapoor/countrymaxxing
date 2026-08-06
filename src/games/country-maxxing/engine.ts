@@ -1,5 +1,6 @@
 import { countries as allCountries, withArticle, type Country } from "../../data/countries";
 import { borderLengthBetween } from "../../data/borderLengths";
+import { SIZE_COMPARE_INELIGIBLE } from "../../data/mapCoverage";
 import { getMissWeight, getStat, pickWeighted, recordAttempt } from "../../core/stats";
 import type { TalliedItem } from "../../core/sessionTally";
 import { REVIEW_TIER_MAX_TRIES, type ReviewTier } from "../../components/WorldMap";
@@ -393,4 +394,140 @@ export function weakPoolForBorders(pool: Country[], typeSetting: BorderQuestionT
     const types = typeSetting === "mixed" ? eligible : eligible.includes(typeSetting) ? [typeSetting] : [];
     return types.some((t) => isWeak(c, borderTag(t)));
   });
+}
+
+// Size Compare ("It's Relative"): given a candidate country, pick which of
+// three silhouette scales is its true size relative to a randomly-paired
+// reference country. Unlike every other mode, correctness isn't about
+// recalling a fact — it's picking the right *rendered scale* — so there's
+// no prompt text to match, just a candidate/reference pairing and three
+// pre-computed scale options (see CountrySilhouette.tsx for how a scale
+// value becomes an actual on-screen size). Stats are keyed per-candidate,
+// same as every other mode — a per-pair key would need plumbing nothing
+// else in this file expects (weakPool*/focusOnWeakSpots all filter a
+// Country[] by a per-country tag).
+const SIZE_COMPARE_TAG = "size-compare";
+
+// Keeps every option (true value and both decoys) within [1/MAX_DISPLAY_
+// RATIO, MAX_DISPLAY_RATIO] of the reference's own baseline — Russia vs.
+// Vatican City's real ratio (sqrt of ~38 million) would render one
+// silhouette thousands of times the size of the other, and even a "legal"
+// pairing near the old, looser cap (Luxembourg vs. Belarus, ~0.11x) turned
+// out to render as an all-but-invisible speck at SizeComparePlay's base
+// silhouette size — confirmed by actually playing it. 5 keeps the smallest
+// possible option comfortably above that floor while still allowing a real,
+// interesting size difference to show.
+const MAX_DISPLAY_RATIO = 5;
+const REFERENCE_PICK_ATTEMPTS = 20;
+
+export interface SizeCompareQuestion {
+  candidate: Country;
+  reference: Country;
+  trueScale: number; // sqrt(candidate.area / reference.area)
+}
+
+// Tuvalu has no polygon in world-atlas at all; Kiribati's 19 atolls render
+// as sub-pixel specks even fit to their own isolated frame with nothing else
+// competing for space (measured directly — every one under 2.1px in both
+// dimensions at CountrySilhouette's BASE_PX). Cape Verde, which MAP_HARD_TO_
+// RENDER also excludes, was measured the same way and renders fine in
+// isolation (8 islands at 8-32px) — that set was curated for whole-map
+// legibility, not standalone silhouette legibility, so it isn't reused
+// as-is here. See SIZE_COMPARE_INELIGIBLE's own comment in mapCoverage.ts.
+export function sizeCompareEligiblePool(pool: Country[]): Country[] {
+  return pool.filter((c) => !SIZE_COMPARE_INELIGIBLE.has(c.cca3));
+}
+
+export function weakPoolForSizeCompare(pool: Country[]): Country[] {
+  return pool.filter((c) => isWeak(c, SIZE_COMPARE_TAG));
+}
+
+function trueScaleFor(candidate: Country, reference: Country): number {
+  return Math.sqrt(candidate.area / reference.area);
+}
+
+// Reference is picked fresh per round, not queued/weighted like the
+// candidate — its only job is being a legible comparison point. Rerolls a
+// few times for a pairing inside MAX_DISPLAY_RATIO; a pool too narrow to
+// ever satisfy that (e.g. a region filtered down to near-identical-sized
+// countries only) falls back to whatever the last attempt found rather than
+// looping forever — a slightly-too-extreme pairing beats no question at all.
+function pickReferenceFor(candidate: Country, pool: Country[]): Country {
+  const others = pool.filter((c) => c.cca3 !== candidate.cca3);
+  let fallback = others[Math.floor(Math.random() * others.length)]!;
+  for (let i = 0; i < REFERENCE_PICK_ATTEMPTS; i++) {
+    fallback = others[Math.floor(Math.random() * others.length)]!;
+    const scale = trueScaleFor(candidate, fallback);
+    if (Math.max(scale, 1 / scale) <= MAX_DISPLAY_RATIO) return fallback;
+  }
+  return fallback;
+}
+
+// Weighted shuffle over candidates, same shape as buildMapIdentifyQueue.
+export function buildSizeCompareQueue(pool: Country[]): SizeCompareQuestion[] {
+  const remaining = [...pool];
+  const queue: SizeCompareQuestion[] = [];
+  while (remaining.length > 0) {
+    const candidate = pickWeighted(remaining, (c) => getMissWeight(NAMESPACE, statTag(c, SIZE_COMPARE_TAG)));
+    remaining.splice(remaining.indexOf(candidate), 1);
+    const reference = pickReferenceFor(candidate, pool);
+    queue.push({ candidate, reference, trueScale: trueScaleFor(candidate, reference) });
+  }
+  return queue;
+}
+
+export interface ScaleOption {
+  value: number;
+  correct: boolean;
+}
+
+// Two decoys, each the true scale multiplied by a random 1.5-2.5x factor
+// (randomly inverted, so a decoy can be "too big" or "too small"), then
+// clamped into the same [1/MAX_DISPLAY_RATIO, MAX_DISPLAY_RATIO] envelope
+// the true value itself is kept in — without this, a decoy could still
+// shrink well past that floor even when the true value didn't (e.g. a
+// true value already near the small end, divided by up to 2.5x again).
+// Rerolled if either lands within 20% of the true value or of the other
+// decoy (checked post-clamp, since clamping can itself collapse two values
+// together) — keeps all three visually distinguishable without snapping to
+// fixed buckets (1x/3x/10x), so every question's options are shaped around
+// the actual pair rather than a preset scale.
+const DECOY_FACTOR_MIN = 1.5;
+const DECOY_FACTOR_MAX = 2.5;
+const DECOY_MIN_SEPARATION = 0.2;
+const DECOY_PICK_ATTEMPTS = 20;
+const DISPLAY_MIN = 1 / MAX_DISPLAY_RATIO;
+const DISPLAY_MAX = MAX_DISPLAY_RATIO;
+
+function pickDecoy(trueScale: number, other: number | null): number {
+  let fallback = Math.min(trueScale * DECOY_FACTOR_MAX, DISPLAY_MAX);
+  for (let i = 0; i < DECOY_PICK_ATTEMPTS; i++) {
+    const factor = DECOY_FACTOR_MIN + Math.random() * (DECOY_FACTOR_MAX - DECOY_FACTOR_MIN);
+    const raw = Math.random() < 0.5 ? trueScale * factor : trueScale / factor;
+    const value = Math.min(Math.max(raw, DISPLAY_MIN), DISPLAY_MAX);
+    fallback = value;
+    const farFromTrue = Math.abs(value - trueScale) / trueScale > DECOY_MIN_SEPARATION;
+    const farFromOther = other === null || Math.abs(value - other) / other > DECOY_MIN_SEPARATION;
+    if (farFromTrue && farFromOther) return value;
+  }
+  return fallback;
+}
+
+export function generateScaleOptions(trueScale: number): ScaleOption[] {
+  const decoyA = pickDecoy(trueScale, null);
+  const decoyB = pickDecoy(trueScale, decoyA);
+  const options: ScaleOption[] = [
+    { value: trueScale, correct: true },
+    { value: decoyA, correct: false },
+    { value: decoyB, correct: false },
+  ];
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [options[i], options[j]] = [options[j]!, options[i]!];
+  }
+  return options;
+}
+
+export function recordSizeCompareAttempt(candidate: Country, correct: boolean): void {
+  recordAttemptFor(candidate, SIZE_COMPARE_TAG, correct);
 }
