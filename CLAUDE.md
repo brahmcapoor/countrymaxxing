@@ -103,12 +103,46 @@ Renders `world-atlas`'s 50m topology via `d3-geo`, projected with
 - Antimeridian-crossing countries (Fiji) and long-span outliers (Russia)
   are handled via circular-mean-longitude rotation + an outlier exclusion
   from the fit target — see `meanLongitude`/`OUTLIER_SPAN_DEGREES`.
+- **The rotation can only move the seam, not remove it**, and for a selection
+  spanning opposite sides of the globe it lands on a country rather than open
+  ocean (Africa + Oceania rotates to ~27°E, putting the seam through
+  Kiribati). That country then draws at *both* edges of the map, so
+  `path.bounds` for it spans the full map width and its center is somewhere
+  meaningless — Kiribati's came out centered over the DR Congo, which is
+  where the auto-zoom inset's anchor, its leader lines, the current-question
+  locator ring and the portrait scroll-to-center all pointed, while the inset
+  "zoomed" to a 752-unit box, i.e. the whole world. It also dragged the map's
+  own fit out to whole-world scale (139 where the selection needed 233).
+  `crossesProjectionSeam` (`mapGeometry.ts`) detects it; the fix is to measure
+  and fit a focused *part* of such a country — see `alwaysInsetFocusByCcn3`
+  below. A seam-crosser with no focus point deliberately stays in the fit
+  as-is: dropping it is fine for an outlying archipelago but not for the USA,
+  which the seam crosses (through Alaska) whenever all five regions are
+  selected.
 - Hit-testing is a hidden `<canvas>` + `Path2D`, not DOM event targets.
 - `mapCoverage.ts`'s `MAP_HARD_TO_RENDER`/`MAP_ALWAYS_INSET` are a
   **known-cases list, not an automatic detector** — countries with no
   polygon in the topology (Tuvalu, Kosovo) or too sparse/small to read at
   normal zoom (Kiribati, Cape Verde) get a marker or a dedicated inset.
   Add to this list by hand if another one turns up.
+- The always-inset countries reach `WorldMap` as `alwaysInsetFocusByCcn3`, a
+  ccn3 → capital-coordinate **map, not a set**. Three things key off that
+  point: the inset frames the island group around it (`geometryNearPoint`,
+  8° radius) rather than the country's full extent, `built.bounds` measures
+  that group (so anchor/ring/scroll follow), and the fit substitutes it for a
+  seam-crossing country. Cape Verde is entirely within one group's radius, so
+  none of this changes it — it's Kiribati that needs all three.
+- **Zoom can't rescue sub-pixel geometry.** Kiribati's atolls are 0.1-1 map
+  units of land inside a ~19-unit chain, so even a correctly-framed inset
+  drew them 1-3px — a visibly empty bubble. Islands rendering under
+  `INSET_MIN_ISLAND_PX` get a marker apiece in the inset (same "a dot beats
+  an invisible shape" idea as point countries, one per island instead of one
+  per country); anything already legible keeps its real outline, which is why
+  Cape Verde's eight islands (4-9px in its own inset) are untouched.
+- A point country's polygon is excluded from the fit in favor of its marker
+  coordinate — nothing draws that polygon, so letting it drive the frame just
+  wasted space (and, for Kiribati on Manifest and the summary map, forced the
+  same whole-world fit as above).
 - Decorative `position: fixed` overlays need `isolate` on an ancestor plus
   a negative `z-index` to paint behind static content — a bare negative
   z-index falls behind the *whole page's* background, not just its own
