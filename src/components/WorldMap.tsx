@@ -11,6 +11,7 @@ import { geoBounds, geoCentroid, geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import { randomLoadingMessage } from "../data/loadingMessages";
 import { MAP_EXCLUDE_RENDER } from "../data/mapCoverage";
+import { crossesProjectionSeam, geometryNearPoint } from "./mapGeometry";
 
 interface CountryFeature {
   type: "Feature";
@@ -49,6 +50,11 @@ const BLOWUP_SIZE = 150; // rendered pixel size of the auto-blowup inset
 // world map, don't). 16 sits in the gap between those two clusters.
 const SMALL_COUNTRY_THRESHOLD = 16;
 const POINT_COUNTRY_RADIUS = 3.5; // marker radius for countries with no polygon shape
+// Inside the auto-blowup inset: the rendered size under which an island is
+// a smudge rather than a shape, and the radius of the marker that stands in
+// for it when it is. Both in rendered pixels — see insetMarkerRadius.
+const INSET_MIN_ISLAND_PX = 3;
+const INSET_ISLAND_MARKER_PX = 3.5;
 // A country whose own bounding box spans more than this many degrees of
 // longitude is excluded from the FIT calculation when a region filter is
 // active — it still renders, it just doesn't get to force the whole view
@@ -169,6 +175,26 @@ function reviewFillClassFor(isCurrent: boolean, tier: ReviewTier | undefined, in
   if (!tier) return notAskedFillClass(inScope); // not asked this session — the scale's neutral midpoint
   const step = Math.min(tier.tries, REVIEW_TIER_MAX_TRIES) - 1;
   return REVIEW_TIER_FILLS[tier.outcome === "correct" ? "correct" : "wrong"][step];
+}
+
+/** Everything the two coloring modes below need to color one country, bundled
+ * so the three places that draw a country (its polygon, a point country's
+ * marker, an inset island marker) can share one call instead of each
+ * re-writing the same which-mode-am-I-in ternary. */
+interface Coloring {
+  filledCcn3s: Set<string>;
+  currentCcn3?: string;
+  wrongCcn3s?: Set<string>;
+  reviewTierByCcn3?: Map<string, ReviewTier>;
+  focusCcn3s?: Set<string>;
+}
+
+function fillClassForId(id: string, c: Coloring): string {
+  const inScope = !c.focusCcn3s || c.focusCcn3s.has(id);
+  const isCurrent = c.currentCcn3 !== undefined && id === c.currentCcn3;
+  return c.reviewTierByCcn3
+    ? reviewFillClassFor(isCurrent, c.reviewTierByCcn3.get(id), inScope)
+    : fillClassFor(isCurrent, !!c.wrongCcn3s?.has(id), c.filledCcn3s.has(id), inScope);
 }
 
 function fillClassFor(isCurrent: boolean, isWrong: boolean, isFilled: boolean, inScope: boolean): string {
@@ -302,7 +328,7 @@ export function WorldMap({
   pointCountries,
   hintPins,
   autoZoomCcn3,
-  alwaysInsetCcn3s,
+  alwaysInsetFocusByCcn3,
   className,
 }: {
   filledCcn3s: Set<string>;
@@ -350,11 +376,22 @@ export function WorldMap({
    * zoom level the region selection landed on. */
   autoZoomCcn3?: string;
   /** Countries that always get the inset regardless of size — for ones whose
-   * shape is correct but too spatially sparse to read (e.g. Kiribati's
-   * atolls spanning 145° of longitude). The inset fits their own true
-   * bounding box rather than zooming tightly in, so what's shown is the
-   * real scattered geometry, not an artificially close crop. */
-  alwaysInsetCcn3s?: Set<string>;
+   * shape is correct but too spatially sparse to read (e.g. Kiribati's atolls,
+   * strung across 39° of longitude in three separate island groups) — each
+   * mapped to the [longitude, latitude] the inset should center on, in
+   * practice its capital.
+   *
+   * The inset fits the island group around that point (see
+   * `geometryNearPoint`) rather than the country's full bounding box. Fitting
+   * the full box was the original design — "show the real scattered geometry,
+   * not an artificially close crop" — but for a country this sparse it never
+   * produced anything readable: even at an Oceania-only fit the box is 203
+   * map units wide, so the atolls inside it render sub-pixel, and once a
+   * multi-region fit rotates the projection's seam through the country the
+   * box spans the whole map and the inset is a picture of the entire world.
+   * Cape Verde, compact enough that its whole extent is within the focus
+   * radius, is unaffected. */
+  alwaysInsetFocusByCcn3?: Map<string, [number, number]>;
   className?: string;
 }) {
   const [features, setFeatures] = useState<CountryFeature[] | null>(null);
@@ -514,16 +551,52 @@ export function WorldMap({
     const finalTarget = fitTarget.length > 0 ? fitTarget : isFocused ? focusFeatures : features;
 
     const projection = geoNaturalEarth1();
-    if (isFocused) projection.rotate([-meanLongitude(finalTarget), 0]);
+    const rotationLon = isFocused ? meanLongitude(finalTarget) : 0;
+    if (isFocused) projection.rotate([-rotationLon, 0]);
+
+    // Rotating away from the seam is the whole point of meanLongitude above,
+    // but it can only move the seam somewhere — for a selection spanning
+    // opposite sides of the globe it lands *on* a country instead of in open
+    // ocean. That country then has geometry at both edges of the map, so the
+    // box fitExtent sees for it is the full 360° and the fit gives up and
+    // renders the whole world however tight the actual selection is: Africa +
+    // Oceania puts the seam through Kiribati, and fitting around Kiribati's
+    // 360° box scaled the map to 139 where the selection itself only needed
+    // 233 — the entire world on screen to show two regions.
+    //
+    // Only a country we have a focus point for is substituted (fit to that
+    // island group instead of its split full extent). A seam-crossing country
+    // without one stays in the fit exactly as before, whole-world result and
+    // all: dropping it is fine for an outlying archipelago but not for, say,
+    // the USA, which the seam runs through whenever every region is selected
+    // at once (rotation ~21°E puts it through Alaska) — cutting that from the
+    // fit zooms past Alaska and Hawaii entirely, which is worse than a
+    // too-wide fit.
+    const seamAdjusted: unknown[] = isFocused
+      ? finalTarget.map<unknown>((f) => {
+          // A point country renders as a marker at one coordinate, so that
+          // coordinate — not the polygon nothing will draw — is what the fit
+          // has to keep in frame. Same seam problem otherwise: Kiribati is a
+          // marker on Manifest and on every summary map, and its unrendered
+          // polygon was still dragging those fits out to the whole world.
+          const marker = pointCountries?.get(f.id);
+          if (marker) return { type: "Feature", geometry: { type: "Point", coordinates: marker } };
+          if (!crossesProjectionSeam(f, rotationLon)) return f;
+          const focus = alwaysInsetFocusByCcn3?.get(f.id);
+          return (focus && geometryNearPoint(f, focus)) || f;
+        })
+      : finalTarget;
+    const fitFeatures = seamAdjusted.length > 0 ? seamAdjusted : finalTarget;
+
     projection.fitExtent(
       [
         [PADDING, PADDING],
         [WIDTH - PADDING, HEIGHT - PADDING],
       ],
-      { type: "FeatureCollection", features: finalTarget } as any,
+      { type: "FeatureCollection", features: fitFeatures } as any,
     );
     return { projection, path: geoPath(projection) };
-  }, [features, focusCcn3s]);
+  }, [features, focusCcn3s, alwaysInsetFocusByCcn3, pointCountries]);
 
   // A new fit (initial load, or a region-filter change) re-projects the
   // whole map — any manual zoom/pan from before is now pointed at the wrong
@@ -586,10 +659,11 @@ export function WorldMap({
     const { path, projection } = projected;
     const path2Ds = new Map<string, Path2D>();
     const bounds = new Map<string, Bounds>();
+    const coloring: Coloring = { filledCcn3s, currentCcn3, wrongCcn3s, reviewTierByCcn3, focusCcn3s };
     const elements = features.map((f, i) => {
       // A point-country override takes full precedence over its real
-      // polygon (e.g. Kiribati's actual shape is ~33 imperceptible specks
-      // scattered across 145° of longitude) — skip it entirely here.
+      // polygon (e.g. Tuvalu, which has no polygon at all in the topology) —
+      // skip it entirely here.
       if (pointCountries?.has(f.id)) return null;
       // Duplicate/overlapping geometry for a territory not in our country
       // set — see MAP_EXCLUDE_RENDER's comment (Western Sahara over Morocco).
@@ -604,12 +678,22 @@ export function WorldMap({
         if (existing) existing.addPath(new Path2D(d));
         else path2Ds.set(f.id, new Path2D(d));
 
-        const b = path.bounds(f as any) as [[number, number], [number, number]];
+        // Everything that asks "where is this country on screen" — the
+        // auto-zoom inset and its anchor dot, the current-question locator
+        // ring, the portrait-mode scroll-into-view — reads these bounds, so a
+        // scattered country measures its focused island group rather than its
+        // full extent. Measuring the full extent put all four of those in the
+        // middle of Africa for Kiribati (see the prop's comment); it's also
+        // what the inset was zooming to, hence a "close-up" of the whole
+        // world. The rendered path below is still the country's real, complete
+        // geometry — only the measurement is focused.
+        const focus = alwaysInsetFocusByCcn3?.get(f.id);
+        const measured = (focus && geometryNearPoint(f, focus)) || f;
+        const b = path.bounds(measured as any) as [[number, number], [number, number]];
         const box: Bounds = [b[0][0], b[0][1], b[1][0], b[1][1]];
         const existingBox = bounds.get(f.id);
         bounds.set(f.id, existingBox ? mergeBounds(existingBox, box) : box);
       }
-      const inScope = !focusCcn3s || focusCcn3s.has(f.id);
       const popClass = justFilledIds.has(f.id) ? " map-pop-in" : "";
       return (
         <path
@@ -617,16 +701,7 @@ export function WorldMap({
           d={d}
           strokeWidth={0.5}
           vectorEffect="non-scaling-stroke"
-          className={
-            (reviewTierByCcn3
-              ? reviewFillClassFor(currentCcn3 !== undefined && f.id === currentCcn3, reviewTierByCcn3.get(f.id), inScope)
-              : fillClassFor(
-                  currentCcn3 !== undefined && f.id === currentCcn3,
-                  !!wrongCcn3s?.has(f.id),
-                  filledCcn3s.has(f.id),
-                  inScope,
-                )) + popClass
-          }
+          className={fillClassForId(f.id, coloring) + popClass}
         />
       );
     });
@@ -636,7 +711,6 @@ export function WorldMap({
           .map(([id, lngLat]) => {
             const point = projection(lngLat);
             if (!point) return null;
-            const inScope = !focusCcn3s || focusCcn3s.has(id);
             const box: Bounds = [
               point[0] - POINT_COUNTRY_RADIUS,
               point[1] - POINT_COUNTRY_RADIUS,
@@ -653,16 +727,7 @@ export function WorldMap({
                 r={POINT_COUNTRY_RADIUS}
                 strokeWidth={0.5}
                 vectorEffect="non-scaling-stroke"
-                className={
-                  (reviewTierByCcn3
-                    ? reviewFillClassFor(currentCcn3 !== undefined && id === currentCcn3, reviewTierByCcn3.get(id), inScope)
-                    : fillClassFor(
-                        currentCcn3 !== undefined && id === currentCcn3,
-                        !!wrongCcn3s?.has(id),
-                        filledCcn3s.has(id),
-                        inScope,
-                      )) + popClass
-                }
+                className={fillClassForId(id, coloring) + popClass}
               />
             );
           })
@@ -724,7 +789,31 @@ export function WorldMap({
     pointCountries,
     hintPins,
     justFilledIds,
+    alwaysInsetFocusByCcn3,
   ]);
+
+  // Where each island of the auto-zoomed country's focused group sits, and how
+  // big it draws — for the inset's island markers below. Only computed for a
+  // country with a focus point (Kiribati, Cape Verde); everything else gets an
+  // empty list and renders nothing extra.
+  const insetIslands = useMemo(() => {
+    const focus = autoZoomCcn3 ? alwaysInsetFocusByCcn3?.get(autoZoomCcn3) : undefined;
+    if (!features || !projected || !focus) return [];
+    const f = features.find((candidate) => candidate.id === autoZoomCcn3);
+    const group = f && geometryNearPoint(f, focus);
+    if (!group) return [];
+    return group.geometry.coordinates.map((coordinates) => {
+      const b = projected.path.bounds({ type: "Polygon", coordinates } as any) as [
+        [number, number],
+        [number, number],
+      ];
+      return {
+        x: (b[0][0] + b[1][0]) / 2,
+        y: (b[0][1] + b[1][1]) / 2,
+        size: Math.max(b[1][0] - b[0][0], b[1][1] - b[0][1]),
+      };
+    });
+  }, [features, projected, autoZoomCcn3, alwaysInsetFocusByCcn3]);
 
   // A pulsing "locate me" ring at the current question's centroid, on top of
   // its own current-pulse yellow fill — color alone wasn't always enough to
@@ -749,7 +838,7 @@ export function WorldMap({
   const autoZoomSize = autoZoomBounds
     ? Math.max(autoZoomBounds[2] - autoZoomBounds[0], autoZoomBounds[3] - autoZoomBounds[1])
     : 0;
-  const isAlwaysInset = !!autoZoomCcn3 && !!alwaysInsetCcn3s?.has(autoZoomCcn3);
+  const isAlwaysInset = !!autoZoomCcn3 && !!alwaysInsetFocusByCcn3?.has(autoZoomCcn3);
   // The inset only earns its place while the map is at its default fit —
   // it exists to make a country legible when the player has no other way to
   // get a closer look. The moment they zoom in manually they're doing that
@@ -765,9 +854,26 @@ export function WorldMap({
   const autoZoomCenterX = autoZoomBounds ? (autoZoomBounds[0] + autoZoomBounds[2]) / 2 : 0;
   const autoZoomCenterY = autoZoomBounds ? (autoZoomBounds[1] + autoZoomBounds[3]) / 2 : 0;
   const autoZoomCenter = [autoZoomCenterX, autoZoomCenterY];
-  // A "sparse" country fits its own true (possibly large) bounding box in
-  // full; a genuinely small-and-compact one gets a fixed close-up padding.
+  // A "sparse" country shows its focused island group with a little room to
+  // breathe around it (autoZoomBounds is already only that group, not the
+  // country's full extent — see alwaysInsetFocusByCcn3); a genuinely
+  // small-and-compact one gets a fixed close-up padding.
   const autoZoomRadius = isAlwaysInset ? autoZoomSize / 2 + 10 : Math.max(autoZoomSize / 2 + 6, 10);
+  // Zooming can't rescue an island that's smaller than a pixel to begin with:
+  // Kiribati's Gilbert atolls are 0.1-1 map units of land spread over a
+  // ~19-unit chain, so a bubble framing the chain draws each of them 1-3px —
+  // an empty circle, which is what the inset showed even once it was pointed
+  // at the right place. Islands that come out under INSET_MIN_ISLAND_PX get a
+  // marker at their own position instead, on the same "a dot beats an
+  // invisible shape" principle as MAP_HARD_TO_RENDER's point countries, one
+  // per island rather than one per country. Both sizes convert from px into
+  // map units against the inset's own zoom, so the markers stay a constant
+  // size on screen and — the part that matters — an island already big enough
+  // to read keeps its real outline: none of Cape Verde's eight, at 4-9px in
+  // its own inset, is replaced by anything.
+  const insetPxToUnits = (autoZoomRadius * 2) / BLOWUP_SIZE;
+  const insetMarkerRadius = INSET_ISLAND_MARKER_PX * insetPxToUnits;
+  const insetMinIslandSize = INSET_MIN_ISLAND_PX * insetPxToUnits;
 
   // Tracks the auto-zoomed country's real on-screen position (via the main
   // map SVG's screen CTM, same technique as updateHover's inverse) so the
@@ -1268,6 +1374,26 @@ export function WorldMap({
                 >
                   {built.elements}
                   {built.pointElements}
+                  {autoZoomCcn3 &&
+                    insetIslands.map(({ x, y, size }, i) =>
+                      size < insetMinIslandSize ? (
+                        <circle
+                          key={`island-${i}`}
+                          cx={x}
+                          cy={y}
+                          r={insetMarkerRadius}
+                          strokeWidth={0.5}
+                          vectorEffect="non-scaling-stroke"
+                          className={fillClassForId(autoZoomCcn3, {
+                            filledCcn3s,
+                            currentCcn3,
+                            wrongCcn3s,
+                            reviewTierByCcn3,
+                            focusCcn3s,
+                          })}
+                        />
+                      ) : null,
+                    )}
                 </svg>
               </div>
             </>

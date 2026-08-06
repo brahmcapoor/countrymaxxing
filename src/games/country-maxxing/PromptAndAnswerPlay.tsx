@@ -118,8 +118,11 @@ export function PromptAndAnswerPlay({
         .map((c) => [c.ccn3, c.capitalLatLng] as const),
     ),
   ).current;
-  const alwaysInsetCcn3s = useRef(
-    new Set(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => c.ccn3)),
+  // Mapped to each one's capital, not just listed: the inset zooms to the
+  // island group around that point rather than the country's full extent —
+  // see WorldMap's alwaysInsetFocusByCcn3.
+  const alwaysInsetFocusByCcn3 = useRef(
+    new Map(pool.filter((c) => MAP_ALWAYS_INSET.has(c.cca3)).map((c) => [c.ccn3, c.capitalLatLng] as const)),
   ).current;
   const countryByCcn3 = useRef(new Map(pool.map((c) => [c.ccn3, c] as const))).current;
   // Derived straight off sessionTally rather than mirrored into its own
@@ -312,7 +315,7 @@ export function PromptAndAnswerPlay({
         capitalDots={capitalDots}
         pointCountries={pointCountries}
         autoZoomCcn3={currentCcn3}
-        alwaysInsetCcn3s={alwaysInsetCcn3s}
+        alwaysInsetFocusByCcn3={alwaysInsetFocusByCcn3}
         className={`w-full portrait:w-auto transition-[height] duration-300 ${isTyping ? "h-[35dvh]" : "h-full"}`}
       />
 
